@@ -251,7 +251,7 @@ func Open(path string, options Options) (*Pool, error) {
 	if err != nil {
 		return nil, err
 	}
-	file, err := os.Open(path)
+	file, err := OpenFile(path, os.O_RDONLY, 0, options.Mode)
 	if err != nil {
 		return nil, err
 	}
