@@ -28,6 +28,7 @@ const (
 	DefaultMaxLineBytes = 64 << 10
 
 	tailReadBytes = 4 << 10
+	lineReadBytes = 64 << 10
 	mixIncrement  = 0x9e3779b97f4a7c15
 )
 
@@ -76,8 +77,9 @@ type Options struct {
 	SequentialBufferBytes int `json:"sequentialBufferBytes,omitempty" yaml:"sequentialBufferBytes,omitempty" xml:"sequentialBufferBytes,omitempty" cbor:"sequentialBufferBytes,omitempty" bson:"sequentialBufferBytes,omitempty" msgpack:"sequentialBufferBytes,omitempty" toml:"sequentialBufferBytes,omitempty" mapstructure:"sequentialBufferBytes,omitempty"`
 
 	// BlockBytes sets shuffled read granularity and retained data-buffer size.
-	// Values below one use [DefaultBlockBytes]. Keep BlockBytes at least
-	// MaxLineBytes+2 to avoid repeated bounded scans of continuation-only blocks.
+	// Values below one use [DefaultBlockBytes].
+	// Keep BlockBytes at least MaxLineBytes+2 when long lines are common to
+	// reduce continuation reads.
 	BlockBytes int `json:"blockBytes,omitempty" yaml:"blockBytes,omitempty" xml:"blockBytes,omitempty" cbor:"blockBytes,omitempty" bson:"blockBytes,omitempty" msgpack:"blockBytes,omitempty" toml:"blockBytes,omitempty" mapstructure:"blockBytes,omitempty"`
 
 	// RegionBytes sets shuffled seek locality. Values below one use
@@ -189,7 +191,7 @@ type Pool struct {
 	noCopy           noCopy
 	terminal         error
 	file             *os.File
-	section          *io.SectionReader
+	limited          io.LimitedReader
 	reader           *bufio.Reader
 	buffer           []byte
 	offsets          []uint32
@@ -199,6 +201,7 @@ type Pool struct {
 	blockCount       int64
 	regionCount      int64
 	regionsForShard  int64
+	regionsPerCheck  int64
 	blocksPerRegion  int64
 	regionCursor     int64
 	nextRegion       int64
@@ -244,8 +247,9 @@ func New(path string, mode Mode, reuse bool) (*Pool, error) {
 // Open opens an immutable newline-delimited regular file. Open performs no
 // source scan, proportional allocation, sidecar construction, or preloading.
 // The source must not change until [Pool.Close]. Size and modification-time
-// checks detect ordinary changes at bounded checkpoints, not adversarial
-// same-metadata rewrites.
+// checks detect ordinary changes at exhaustion and after roughly each
+// [DefaultRegionBytes] of shuffled input, not adversarial same-metadata
+// rewrites.
 func Open(path string, options Options) (*Pool, error) {
 	err := options.Mode.Valid()
 	if err != nil {
@@ -291,11 +295,8 @@ func Open(path string, options Options) (*Pool, error) {
 			file.Close()
 			return nil, errors.New("proxypool: sequential memory bound overflows int64")
 		}
-		section := io.NewSectionReader(file, 0, info.Size())
-		return &Pool{
+		pool := &Pool{
 			file:            file,
-			section:         section,
-			reader:          bufio.NewReaderSize(section, sequentialBytes),
 			fileSize:        info.Size(),
 			modified:        info.ModTime().UnixNano(),
 			sequentialBytes: sequentialBytes,
@@ -303,7 +304,12 @@ func Open(path string, options Options) (*Pool, error) {
 			shardCount:      1,
 			mode:            ModeSequential,
 			reuse:           options.Reuse,
-		}, nil
+		}
+		// LimitedReader preserves the open-time boundary while retaining
+		// sequential File.Read calls.
+		pool.limited = io.LimitedReader{R: file, N: pool.fileSize}
+		pool.reader = bufio.NewReaderSize(&pool.limited, sequentialBytes)
+		return pool, nil
 	}
 	blockBytes := positiveOrDefault(options.BlockBytes, DefaultBlockBytes)
 	regionBytes := options.RegionBytes
@@ -335,18 +341,21 @@ func Open(path string, options Options) (*Pool, error) {
 			seed = mixIncrement
 		}
 	}
+	// Source validation cadence stays independent of the locality setting.
+	regionsPerCheck := max(int64(1), DefaultRegionBytes/regionBytes)
 	pool := &Pool{
-		file:         file,
-		fileSize:     info.Size(),
-		modified:     info.ModTime().UnixNano(),
-		regionBytes:  regionBytes,
-		seed:         seed,
-		blockBytes:   blockBytes,
-		maxLineBytes: maxLineBytes,
-		shardCount:   shardCount,
-		shardIndex:   options.ShardIndex,
-		mode:         options.Mode,
-		reuse:        options.Reuse,
+		file:            file,
+		fileSize:        info.Size(),
+		modified:        info.ModTime().UnixNano(),
+		regionBytes:     regionBytes,
+		regionsPerCheck: regionsPerCheck,
+		seed:            seed,
+		blockBytes:      blockBytes,
+		maxLineBytes:    maxLineBytes,
+		shardCount:      shardCount,
+		shardIndex:      options.ShardIndex,
+		mode:            options.Mode,
+		reuse:           options.Reuse,
 	}
 	pool.blockCount = ceilingQuotient(info.Size(), int64(blockBytes))
 	pool.blocksPerRegion = blocksPerRegion
@@ -356,20 +365,23 @@ func Open(path string, options Options) (*Pool, error) {
 	return pool, nil
 }
 
-// Next returns next proxy. It returns [io.EOF] after exhaustion, [ErrClosed]
-// after close, and the underlying I/O or validation error on failure. A
-// non-EOF failure remains terminal until a successful [Pool.Reset].
+// Next returns next proxy.
+// It returns [io.EOF] after exhaustion, [ErrClosed] after close, and the
+// underlying I/O or validation error on failure.
+// Every returned error remains terminal until a successful [Pool.Reset].
 func (pool *Pool) Next() (string, error) {
 	if pool == nil {
 		return "", ErrClosed
 	}
 	pool.mu.Lock()
-	defer pool.mu.Unlock()
 	line, err := pool.nextLocked()
 	if err != nil {
+		pool.mu.Unlock()
 		return "", err
 	}
-	return string(line), nil
+	result := string(line)
+	pool.mu.Unlock()
+	return result, nil
 }
 
 // NextBytes appends next proxy to dst[:0]. Returned bytes belong to caller.
@@ -381,12 +393,14 @@ func (pool *Pool) NextBytes(dst []byte) ([]byte, error) {
 		return dst[:0], ErrClosed
 	}
 	pool.mu.Lock()
-	defer pool.mu.Unlock()
 	line, err := pool.nextLocked()
 	if err != nil {
+		pool.mu.Unlock()
 		return dst[:0], err
 	}
-	return append(dst[:0], line...), nil
+	result := append(dst[:0], line...)
+	pool.mu.Unlock()
+	return result, nil
 }
 
 func (pool *Pool) nextLocked() ([]byte, error) {
@@ -396,15 +410,16 @@ func (pool *Pool) nextLocked() ([]byte, error) {
 	if pool.terminal != nil {
 		return nil, pool.terminal
 	}
+	var (
+		line []byte
+		err  error
+	)
 	if pool.mode == ModeSequential {
-		line, err := pool.nextSequentialLocked()
-		if err != nil && !errors.Is(err, io.EOF) {
-			pool.terminal = err
-		}
-		return line, err
+		line, err = pool.nextSequentialLocked()
+	} else {
+		line, err = pool.nextShuffledLocked()
 	}
-	line, err := pool.nextShuffledLocked()
-	if err != nil && !errors.Is(err, io.EOF) {
+	if err != nil {
 		pool.terminal = err
 	}
 	return line, err
@@ -464,10 +479,11 @@ func (pool *Pool) nextSequentialLocked() ([]byte, error) {
 		if err = pool.validateSourceLocked(); err != nil {
 			return nil, err
 		}
-		if _, err = pool.section.Seek(0, io.SeekStart); err != nil {
+		if _, err = pool.file.Seek(0, io.SeekStart); err != nil {
 			return nil, err
 		}
-		pool.reader.Reset(pool.section)
+		pool.limited.N = pool.fileSize
+		pool.reader.Reset(&pool.limited)
 		pool.seqOffset = 0
 		pool.cycle++
 		lineOffset = 0
@@ -536,8 +552,10 @@ func (pool *Pool) loadNextBlockLocked() error {
 			pool.startCycleLocked(pool.cycle + 1)
 			continue
 		}
-		if err := pool.validateSourceLocked(); err != nil {
-			return err
+		if pool.regionCursor > 0 && pool.regionCursor%pool.regionsPerCheck == 0 {
+			if err := pool.validateSourceLocked(); err != nil {
+				return err
+			}
 		}
 		region := pool.nextRegion
 		pool.regionCursor++
@@ -559,7 +577,7 @@ func (pool *Pool) loadBlockLocked(block int64) error {
 		readOffset--
 	}
 	ownershipEnd := prefix + baseBytes
-	lookaheadBytes := min(tailReadBytes, pool.maxLineBytes+2)
+	lookaheadBytes := min(tailReadBytes, pool.maxLineBytes+2, pool.blockBytes)
 	if remaining := pool.fileSize - blockStart - int64(baseBytes); int64(lookaheadBytes) > remaining {
 		lookaheadBytes = int(remaining)
 	}
@@ -580,13 +598,6 @@ func (pool *Pool) loadBlockLocked(block int64) error {
 	if prefix == 1 && pool.buffer[0] != '\n' {
 		newline := bytes.IndexByte(pool.buffer[prefix:ownershipEnd], '\n')
 		if newline < 0 {
-			continuationBytes := baseBytes
-			if ownershipEnd < len(pool.buffer) && pool.buffer[ownershipEnd] == '\n' && pool.buffer[ownershipEnd-1] == '\r' {
-				continuationBytes--
-			}
-			if err = pool.validateContinuationLocked(blockStart, continuationBytes); err != nil {
-				return err
-			}
 			pool.lineCursor, pool.nextLine = 0, 0
 			return nil
 		}
@@ -648,7 +659,7 @@ func (pool *Pool) extendLineLocked(readOffset int64, lineStart, searchStart int)
 			}
 			return len(pool.buffer), nil
 		}
-		readBytes := min(tailReadBytes, limit-len(pool.buffer))
+		readBytes := min(lineReadBytes, max(tailReadBytes, pool.blockBytes), limit-len(pool.buffer))
 		if remaining := pool.fileSize - absoluteEnd; int64(readBytes) > remaining {
 			readBytes = int(remaining)
 		}
@@ -685,7 +696,8 @@ func (pool *Pool) resizeBuffer(length int) {
 	maximum := pool.blockBytes + pool.maxLineBytes + 3
 	capacity := length
 	if cap(pool.buffer) == 0 && pool.fileSize > int64(pool.blockBytes) {
-		capacity = max(capacity, min(maximum, pool.blockBytes+1+min(tailReadBytes, pool.maxLineBytes+2)))
+		capacity = max(capacity, min(maximum,
+			pool.blockBytes+1+min(tailReadBytes, pool.maxLineBytes+2, pool.blockBytes)))
 	} else if cap(pool.buffer) > 0 {
 		base := min(pool.blockBytes+1, maximum)
 		tailCapacity := max(0, cap(pool.buffer)-base)
@@ -704,47 +716,6 @@ func (pool *Pool) resizeBuffer(length int) {
 	grown := make([]byte, len(pool.buffer), capacity)
 	copy(grown, pool.buffer)
 	pool.buffer = grown[:length]
-}
-
-func (pool *Pool) validateContinuationLocked(blockStart int64, contentBytes int) error {
-	if contentBytes >= pool.maxLineBytes {
-		return pool.lineTooLong(blockStart - 1)
-	}
-	remaining := pool.maxLineBytes - contentBytes + 1
-	position := blockStart
-	scratch := pool.buffer[:min(tailReadBytes, cap(pool.buffer))]
-	for scanned := 0; scanned < remaining && position > 0; {
-		readBytes := min(len(scratch), remaining-scanned)
-		if int64(readBytes) > position {
-			readBytes = int(position)
-		}
-		readOffset := position - int64(readBytes)
-		read, err := pool.file.ReadAt(scratch[:readBytes], readOffset)
-		if read != readBytes {
-			if err == nil || errors.Is(err, io.EOF) {
-				err = io.ErrUnexpectedEOF
-			}
-			return fmt.Errorf("proxypool: inspect line before %d: %w", blockStart, err)
-		}
-		if err != nil && !errors.Is(err, io.EOF) {
-			return fmt.Errorf("proxypool: inspect line before %d: %w", blockStart, err)
-		}
-		if newline := bytes.LastIndexByte(scratch[:read], '\n'); newline >= 0 {
-			if scanned+read-newline-1+contentBytes > pool.maxLineBytes {
-				return pool.lineTooLong(readOffset + int64(newline+1))
-			}
-			return nil
-		}
-		scanned += read
-		position = readOffset
-		if position == 0 {
-			if scanned+contentBytes > pool.maxLineBytes {
-				return pool.lineTooLong(0)
-			}
-			return nil
-		}
-	}
-	return pool.lineTooLong(max(0, blockStart-int64(remaining)))
 }
 
 func (pool *Pool) appendOffset(offset uint32) {
@@ -832,11 +803,12 @@ func (pool *Pool) Reset() error {
 	pool.seqLine = pool.seqLine[:0]
 	pool.seqOffset = 0
 	if pool.mode == ModeSequential {
-		if _, err := pool.section.Seek(0, io.SeekStart); err != nil {
+		if _, err := pool.file.Seek(0, io.SeekStart); err != nil {
 			pool.terminal = err
 			return err
 		}
-		pool.reader.Reset(pool.section)
+		pool.limited.N = pool.fileSize
+		pool.reader.Reset(&pool.limited)
 		pool.cycle = 0
 		return nil
 	}
@@ -898,7 +870,7 @@ func (pool *Pool) Close() error {
 	pool.closed = true
 	err := pool.file.Close()
 	pool.file = nil
-	pool.section = nil
+	pool.limited = io.LimitedReader{}
 	pool.reader = nil
 	pool.buffer = nil
 	pool.offsets = nil

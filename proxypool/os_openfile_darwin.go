@@ -7,29 +7,29 @@ import (
 	"syscall"
 )
 
+// OpenFile opens name using flag and perm, with platform-specific access
+// behavior selected by mode.
 func OpenFile(name string, flag int, perm os.FileMode, mode Mode) (*os.File, error) {
-	file, err := os.Open(name)
+	file, err := os.OpenFile(name, flag, perm)
 	if err != nil {
 		return nil, err
 	}
-	var readAhead int // Closest Darwin equivalent to random access.
-	if mode == ModeSequential {
-		readAhead = 1
+	if mode != ModeSequential {
+		return file, nil
 	}
-	if err := withFD(file, func(fd uintptr) error {
+	_ = withFD(file, func(fd uintptr) error {
 		_, err := FcntlInt(
 			fd,
 			syscall.F_RDAHEAD,
-			readAhead,
+			1,
 		)
 		return err
-	}); err != nil {
-		file.Close()
-		return nil, err
-	}
+	})
 	return file, nil
 }
 
+// FcntlInt invokes fcntl on fd with integer command cmd and argument arg.
+// It returns the result and error reported by the kernel.
 func FcntlInt(fd uintptr, cmd, arg int) (int, error) {
 	return fcntl(int(fd), cmd, arg)
 }

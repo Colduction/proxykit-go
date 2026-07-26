@@ -176,6 +176,31 @@ func TestSequentialReuseAndReset(t *testing.T) {
 	}
 }
 
+func TestExhaustionPersistsUntilReset(t *testing.T) {
+	path := writeFile(t, "proxy\n")
+	for _, mode := range []proxypool.Mode{proxypool.ModeSequential, proxypool.ModeShuffled} {
+		pool, err := proxypool.Open(path, proxypool.Options{Mode: mode, Seed: 1})
+		if err != nil {
+			t.Fatalf("Open %d: %v", mode, err)
+		}
+		if line, nextErr := pool.Next(); nextErr != nil || line != "proxy" {
+			t.Fatalf("mode %d first Next = %q, %v", mode, line, nextErr)
+		}
+		for range 2 {
+			if _, nextErr := pool.Next(); !errors.Is(nextErr, io.EOF) {
+				t.Fatalf("mode %d exhausted Next = %v, want io.EOF", mode, nextErr)
+			}
+		}
+		if err = pool.Reset(); err != nil {
+			t.Fatalf("mode %d Reset: %v", mode, err)
+		}
+		if line, nextErr := pool.Next(); nextErr != nil || line != "proxy" {
+			t.Fatalf("mode %d Next after Reset = %q, %v", mode, line, nextErr)
+		}
+		pool.Close()
+	}
+}
+
 func TestEmptyFileReuseDoesNotLoop(t *testing.T) {
 	for _, mode := range []proxypool.Mode{proxypool.ModeSequential, proxypool.ModeShuffled} {
 		pool, err := proxypool.Open(writeFile(t, ""), proxypool.Options{Mode: mode, Reuse: true})
@@ -842,6 +867,68 @@ func BenchmarkNextBytes(b *testing.B) {
 	}
 }
 
+func BenchmarkShuffledContinuation(b *testing.B) {
+	path := writeFile(b, strings.Repeat(strings.Repeat("x", 1<<10)+"\n", 200))
+	pool, err := proxypool.Open(path, proxypool.Options{
+		Mode:         proxypool.ModeShuffled,
+		Reuse:        true,
+		BlockBytes:   16,
+		RegionBytes:  1 << 20,
+		MaxLineBytes: 1 << 10,
+		Seed:         1,
+	})
+	if err != nil {
+		b.Fatalf("Open: %v", err)
+	}
+	defer pool.Close()
+	buffer := make([]byte, 0, 1<<10)
+	if buffer, err = pool.NextBytes(buffer); err != nil {
+		b.Fatalf("warmup: %v", err)
+	}
+	b.SetBytes((1 << 10) + 1)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		buffer, err = pool.NextBytes(buffer[:0])
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkExhaustedNextBytes(b *testing.B) {
+	path := writeFile(b, "proxy\n")
+	for _, test := range []struct {
+		name string
+		mode proxypool.Mode
+	}{
+		{name: "sequential", mode: proxypool.ModeSequential},
+		{name: "shuffled", mode: proxypool.ModeShuffled},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			pool, err := proxypool.Open(path, proxypool.Options{Mode: test.mode, Seed: 1})
+			if err != nil {
+				b.Fatalf("Open: %v", err)
+			}
+			defer pool.Close()
+			buffer := make([]byte, 0, len("proxy"))
+			if buffer, err = pool.NextBytes(buffer); err != nil {
+				b.Fatalf("first NextBytes: %v", err)
+			}
+			if buffer, err = pool.NextBytes(buffer[:0]); err != io.EOF {
+				b.Fatalf("exhausting NextBytes = %v, want io.EOF", err)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				if buffer, err = pool.NextBytes(buffer[:0]); err != io.EOF {
+					b.Fatalf("NextBytes = %v, want io.EOF", err)
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkReadCycle(b *testing.B) {
 	path, _ := makeProxyFile(b, benchmarkLines)
 	info, err := os.Stat(path)
@@ -854,6 +941,13 @@ func BenchmarkReadCycle(b *testing.B) {
 	}{
 		{name: "sequential"},
 		{name: "shuffled", options: proxypool.Options{Mode: proxypool.ModeShuffled, Seed: 1}},
+		{name: "shuffled-region-per-block", options: proxypool.Options{
+			Mode:         proxypool.ModeShuffled,
+			BlockBytes:   4 << 10,
+			RegionBytes:  4 << 10,
+			MaxLineBytes: 128,
+			Seed:         1,
+		}},
 	} {
 		b.Run(test.name, func(b *testing.B) {
 			b.SetBytes(info.Size())
