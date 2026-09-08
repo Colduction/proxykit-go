@@ -2,6 +2,7 @@ package proxyparser_test
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -298,12 +299,12 @@ func TestCanonicalErrorResults(t *testing.T) {
 	}{
 		{"%t://%h:%d", "", proxykit.Proxy{}, proxyparser.ErrSubseqDelimNotFound("://")},
 		{"%t://%h:%d", "http://host", proxykit.Proxy{}, proxyparser.ErrSubseqDelimNotFound(":")},
-		{"%t://%h:%d", "ftp://host:80", proxykit.Proxy{Scheme: "ftp", Host: "host:80"}, proxyparser.ErrInvalidProxyFormat},
-		{"%t://%h:%d", "http://bad host:80", proxykit.Proxy{Scheme: proxykit.HTTP, Host: "bad host:80"}, proxyparser.ErrInvalidProxyFormat},
+		{"%t://%h:%d", "ftp://host:80", proxykit.Proxy{Scheme: "ftp", Host: "host:80"}, fmt.Errorf("%w: %w", proxyparser.ErrInvalidProxyFormat, proxykit.ErrInvalidScheme)},
+		{"%t://%h:%d", "http://bad host:80", proxykit.Proxy{Scheme: proxykit.HTTP, Host: "bad host:80"}, fmt.Errorf("%w: %w", proxyparser.ErrInvalidProxyFormat, proxykit.ErrInvalidHost)},
 		{"%t://%u:%p@%h:%d", "http://user", proxykit.Proxy{}, proxyparser.ErrSubseqDelimNotFound(":")},
 		{"%t://%u:%p@%h:%d", "http://user:pass-host:80", proxykit.Proxy{}, proxyparser.ErrSubseqDelimNotFound("@")},
 		{"%t://%u:%p@%h:%d", "http://user:pass@host", proxykit.Proxy{}, proxyparser.ErrSubseqDelimNotFound(":")},
-		{"%t://%u:%p@%h:%d", "http://:pass@host:80", proxykit.Proxy{Scheme: proxykit.HTTP, Host: "host:80", Password: "pass"}, proxyparser.ErrInvalidProxyFormat},
+		{"%t://%u:%p@%h:%d", "http://:pass@host:80", proxykit.Proxy{Scheme: proxykit.HTTP, Host: "host:80", Password: "pass"}, fmt.Errorf("%w: %w", proxyparser.ErrInvalidProxyFormat, proxykit.ErrInvalidCredentials)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
@@ -783,5 +784,80 @@ func BenchmarkNew_LongFormat(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		_, _ = proxyparser.New(format, false)
+	}
+}
+
+func TestParseSchemeCaseInsensitive(t *testing.T) {
+	tests := []struct {
+		format string
+		strict bool
+		input  string
+		want   proxykit.ProxyScheme
+	}{
+		{"%t://%h:%d", true, "SOCKS5H://proxy.example.com:1080", proxykit.SOCKS5H},
+		{"%t://%u:%p@%h:%d", true, "SOCKS5H://user:pass@proxy.example.com:1080", proxykit.SOCKS5H},
+		{"(%t)%h:%d", true, "(HTTP)proxy.example.com:80", proxykit.HTTP},
+		{"(%t)%h:%d", false, "(Socks5H)proxy.example.com:1080", proxykit.SOCKS5H},
+		{"%t://%h", false, "SOCKS4A://proxy.example.com:80", proxykit.SOCKS4A},
+		{"%h:%d", false, "HTTP://proxy.example.com:80", proxykit.HTTP},
+	}
+	for _, tt := range tests {
+		parser := mustNew(t, tt.format, tt.strict)
+		parsed, err := parser.ParseString(tt.input)
+		if err != nil {
+			t.Fatalf("ParseString(%q): %v", tt.input, err)
+		}
+		if parsed.Scheme != tt.want {
+			t.Errorf("%q strict=%v ParseString(%q).Scheme = %q, want %q", tt.format, tt.strict, tt.input, parsed.Scheme, tt.want)
+		}
+		var fromBytes proxykit.Proxy
+		if err := parser.ParseBytes([]byte(tt.input), &fromBytes); err != nil {
+			t.Fatalf("ParseBytes(%q): %v", tt.input, err)
+		}
+		if fromBytes.Scheme != tt.want {
+			t.Errorf("%q strict=%v ParseBytes(%q).Scheme = %q, want %q", tt.format, tt.strict, tt.input, fromBytes.Scheme, tt.want)
+		}
+	}
+}
+
+func TestParseErrorWrapsValidateSentinel(t *testing.T) {
+	tests := []struct {
+		format, input string
+		strict        bool
+		want          error
+	}{
+		{"%t://%h:%d", "ftp://proxy.example.com:21", true, proxykit.ErrInvalidScheme},
+		{"%t://%h:%d", "http://proxy.example.com:99999", true, proxykit.ErrInvalidPort},
+		{"%t://%h:%d", "http://:80", true, proxykit.ErrInvalidHost},
+		{"%t://%u:%p@%h:%d", "http://:pass@proxy.example.com:80", true, proxykit.ErrInvalidCredentials},
+		{"%t://%u:%p@%h:%d", "socks4://user:pass@192.0.2.10:1080", true, proxykit.ErrInvalidCredentials},
+		{"%t://%u:%p@%h:%d", "http://user:pass@:80", true, proxykit.ErrInvalidHost},
+		{"(%t)%h:%d", "(http)bad host:80", true, proxykit.ErrInvalidHost},
+		{"(%t)%h:%d", "(ftp)proxy.example.com:21", true, proxykit.ErrInvalidScheme},
+		{"(%t)%h:%d", "(http)proxy.example.com:99999", true, proxykit.ErrInvalidPort},
+		{"<%t://%h:%d>", "<http://:80>", true, proxykit.ErrInvalidHost},
+		{"<%t://%u:%p@%h:%d>", "<http://user:pass@:80>", true, proxykit.ErrInvalidHost},
+		{"(%t)%h:%d:%u:%p", "(socks4)proxy.example.com:80:user:pass", true, proxykit.ErrInvalidCredentials},
+		{"%t://%h:%d", "http://proxy.example.com", false, proxykit.ErrInvalidPort},
+		{"%h:%d", "ftp://proxy.example.com:21", false, proxykit.ErrInvalidScheme},
+	}
+	for _, test := range tests {
+		parser := mustNew(t, test.format, test.strict)
+		check := func(name string, err error) {
+			t.Helper()
+			if !errors.Is(err, proxyparser.ErrInvalidProxyFormat) || !errors.Is(err, test.want) {
+				t.Errorf("%s(%q, %q, strict=%v) error = %v, want ErrInvalidProxyFormat wrapping %v", name, test.format, test.input, test.strict, err, test.want)
+			}
+		}
+		_, err := parser.ParseString(test.input)
+		check("ParseString", err)
+		_, err = parser.Parse(test.input)
+		check("Parse", err)
+		var proxy proxykit.Proxy
+		check("ParseInto", parser.ParseInto(test.input, &proxy))
+		check("ParseBytes", parser.ParseBytes([]byte(test.input), &proxy))
+		if allocs := testing.AllocsPerRun(100, func() { _, _ = parser.Parse(test.input) }); allocs != 0 {
+			t.Errorf("Parse(%q, %q) allocs = %v, want 0", test.format, test.input, allocs)
+		}
 	}
 }

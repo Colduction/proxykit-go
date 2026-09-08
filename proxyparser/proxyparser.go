@@ -12,8 +12,9 @@ import (
 )
 
 var (
-	// ErrInvalidProxyFormat is returned when parsed fields fail
-	// [proxykit.Proxy.IsValid].
+	// ErrInvalidProxyFormat is returned, wrapped together with the failing
+	// [proxykit.Proxy.Validate] sentinel, when parsed fields are not a valid
+	// proxy. Match either error with [errors.Is].
 	ErrInvalidProxyFormat = errors.New("proxyparser: parsed string is not a valid proxy format")
 	// ErrInvalidFormatEndStr is returned by [New] when format ends with an
 	// incomplete verb.
@@ -25,7 +26,7 @@ var (
 	ErrHostNotParsed = errors.New("proxyparser: could not parse host")
 	// ErrSchemeNotParsed is returned when lenient parsing produces no scheme.
 	ErrSchemeNotParsed = errors.New("proxyparser: could not parse scheme")
-	// ErrNilProxy is returned by [ProxyParser.ParseInto] when dst is nil.
+	// ErrNilProxy is returned by [Parser.ParseInto] when dst is nil.
 	ErrNilProxy = errors.New("proxyparser: nil proxy destination")
 )
 
@@ -80,7 +81,7 @@ const (
 
 const noPlanIndex uint32 = ^uint32(0)
 
-// parseOp stores pointer-free offsets into proxyParser.format. A zero field
+// parseOp stores pointer-free offsets into Parse.format. A zero field
 // marks a delimiter state; any other field marks a capture state.
 type parseOp struct {
 	delimiterStart   uint32
@@ -103,18 +104,23 @@ type Parser interface {
 	// ParseInto resets dst and parses input into it.
 	// Successful parsing does not allocate for standard proxy formats.
 	// Callers must not access dst during the call. Concurrent calls must use
-	// distinct destinations.
+	// distinct destinations. When ParseInto returns a non-nil error the
+	// contents of dst are unspecified.
 	ParseInto(input string, dst *proxykit.Proxy) error
 
 	// ParseBytes parses input into dst without converting input to an
 	// allocated string.
 	//
-	// Parsed string fields alias input. Concurrent calls must use distinct
+	// Parsed string fields alias input, except that a scheme canonicalized by
+	// [proxykit.ParseScheme] is a constant. Concurrent calls must use distinct
 	// destinations, and callers must keep input immutable while any parsed dst is
-	// in use.
+	// in use. When ParseBytes returns a non-nil error the contents of dst are
+	// unspecified.
 	ParseBytes(input []byte, dst *proxykit.Proxy) error
 }
 
+// Parse is a parser compiled by [New]. It implements [Parser] and is safe for
+// concurrent use by multiple goroutines.
 type Parse struct {
 	format            string
 	plan              []parseOp
@@ -212,7 +218,7 @@ func New(format string, strict bool) (*Parse, error) {
 	}, nil
 }
 
-// Parse implements [Parse.Parse].
+// Parse implements [Parser.Parse].
 func (pp *Parse) Parse(input string) (*proxykit.Proxy, error) {
 	if pp == nil {
 		return nil, nil
@@ -224,12 +230,16 @@ func (pp *Parse) Parse(input string) (*proxykit.Proxy, error) {
 			return nil, ErrSubseqDelimNotFound("://")
 		}
 		scheme := proxykit.ProxyScheme(before)
-		endpointValid := proxykit.IsValidScheme(scheme) && proxykit.IsValidHostnamePort(after)
+		schemeOK := scheme.IsValid()
+		if !schemeOK {
+			scheme, schemeOK = schemeOf(before)
+		}
+		endpointValid := schemeOK && proxykit.IsValidHostnamePort(after)
 		if !endpointValid && strings.LastIndexByte(after, ':') < 0 {
 			return nil, ErrSubseqDelimNotFound(":")
 		}
 		if !endpointValid {
-			return nil, ErrInvalidProxyFormat
+			return nil, invalidProxyFormat((&proxykit.Proxy{Scheme: scheme, Host: after}).Validate())
 		}
 		return &proxykit.Proxy{Scheme: scheme, Host: after}, nil
 	case parserStrictFullCredentials:
@@ -251,13 +261,18 @@ func (pp *Parse) Parse(input string) (*proxykit.Proxy, error) {
 		passwordEnd += passwordStart
 		host := input[passwordEnd+1:]
 		scheme := proxykit.ProxyScheme(input[:schemeEnd])
-		endpointValid := proxykit.IsValidScheme(scheme) && proxykit.IsValidHostnamePort(host)
+		schemeOK := scheme.IsValid()
+		if !schemeOK {
+			scheme, schemeOK = schemeOf(input[:schemeEnd])
+		}
+		endpointValid := schemeOK && proxykit.IsValidHostnamePort(host)
 		if !endpointValid && strings.LastIndexByte(host, ':') < 0 {
 			return nil, ErrSubseqDelimNotFound(":")
 		}
 		username, password := input[usernameStart:usernameEnd], input[passwordStart:passwordEnd]
-		if !endpointValid || !proxykit.IsValidCredentials(username, password) {
-			return nil, ErrInvalidProxyFormat
+		if !endpointValid || !proxykit.IsValidCredentialsFor(scheme, username, password) {
+			parsed := proxykit.Proxy{Scheme: scheme, Host: host, Username: username, Password: password}
+			return nil, invalidProxyFormat(parsed.Validate())
 		}
 		return &proxykit.Proxy{Scheme: scheme, Host: host, Username: username, Password: password}, nil
 	default:
@@ -269,19 +284,19 @@ func (pp *Parse) Parse(input string) (*proxykit.Proxy, error) {
 	}
 }
 
-// ParseString implements [Parse.ParseString].
+// ParseString implements [Parser.ParseString].
 func (pp *Parse) ParseString(input string) (proxykit.Proxy, error) {
 	var proxy proxykit.Proxy
 	err := pp.ParseInto(input, &proxy)
 	return proxy, err
 }
 
-// ParseBytes implements [Parse.ParseBytes].
+// ParseBytes implements [Parser.ParseBytes].
 func (pp *Parse) ParseBytes(input []byte, proxy *proxykit.Proxy) error {
 	return pp.ParseInto(unsafe.String(unsafe.SliceData(input), len(input)), proxy)
 }
 
-// ParseInto implements [Parse.ParseInto].
+// ParseInto implements [Parser.ParseInto].
 func (pp *Parse) ParseInto(input string, proxy *proxykit.Proxy) error {
 	if pp == nil {
 		return nil
@@ -313,6 +328,9 @@ func (pp *Parse) ParseInto(input string, proxy *proxykit.Proxy) error {
 			return ErrSchemeNotParsed
 		}
 		proxy.Scheme = proxykit.ProxyScheme(input[:idx])
+		if !proxy.Scheme.IsValid() {
+			proxy.Scheme, _ = schemeOf(input[:idx])
+		}
 		schemeParsed = proxy.Scheme != ""
 		inputPos = idx + 3
 	}
@@ -409,14 +427,12 @@ func (pp *Parse) ParseInto(input string, proxy *proxykit.Proxy) error {
 			hostEnd = inputPos
 			hostParsed = capturedValue != ""
 		case 'd':
-			if proxy.Host == "" {
+			if hostStart >= 0 && hostEnd+1 == start && input[hostEnd] == ':' {
+				proxy.Host = input[hostStart:inputPos]
+			} else if proxy.Host == "" {
 				proxy.Host = capturedValue
 			} else if capturedValue != "" {
-				if hostStart >= 0 && hostEnd+1 == start && input[hostEnd] == ':' {
-					proxy.Host = input[hostStart:inputPos]
-				} else {
-					proxy.Host += ":" + capturedValue
-				}
+				proxy.Host += ":" + capturedValue
 			}
 		default:
 			assignField(proxy, op.field, capturedValue)
@@ -441,8 +457,8 @@ func (pp *Parse) ParseInto(input string, proxy *proxykit.Proxy) error {
 			return ErrHostNotParsed
 		}
 	}
-	if !proxy.IsValid() {
-		return ErrInvalidProxyFormat
+	if err := proxy.Validate(); err != nil {
+		return invalidProxyFormat(err)
 	}
 	return nil
 }
@@ -453,12 +469,16 @@ func parseStrictSchemeHostPort(input string) (proxykit.ProxyScheme, string, erro
 		return "", "", ErrSubseqDelimNotFound("://")
 	}
 	scheme := proxykit.ProxyScheme(before)
-	endpointValid := proxykit.IsValidScheme(scheme) && proxykit.IsValidHostnamePort(after)
+	schemeOK := scheme.IsValid()
+	if !schemeOK {
+		scheme, schemeOK = schemeOf(before)
+	}
+	endpointValid := schemeOK && proxykit.IsValidHostnamePort(after)
 	if !endpointValid && strings.LastIndexByte(after, ':') < 0 {
 		return "", "", ErrSubseqDelimNotFound(":")
 	}
 	if !endpointValid {
-		return scheme, after, ErrInvalidProxyFormat
+		return scheme, after, invalidProxyFormat((&proxykit.Proxy{Scheme: scheme, Host: after}).Validate())
 	}
 	return scheme, after, nil
 }
@@ -482,13 +502,18 @@ func parseStrictFullCredentials(input string) (proxykit.ProxyScheme, string, str
 	passwordEnd += passwordStart
 	host := input[passwordEnd+1:]
 	scheme := proxykit.ProxyScheme(input[:schemeEnd])
-	endpointValid := proxykit.IsValidScheme(scheme) && proxykit.IsValidHostnamePort(host)
+	schemeOK := scheme.IsValid()
+	if !schemeOK {
+		scheme, schemeOK = schemeOf(input[:schemeEnd])
+	}
+	endpointValid := schemeOK && proxykit.IsValidHostnamePort(host)
 	if !endpointValid && strings.LastIndexByte(host, ':') < 0 {
 		return "", "", "", "", ErrSubseqDelimNotFound(":")
 	}
 	username, password := input[usernameStart:usernameEnd], input[passwordStart:passwordEnd]
-	if !endpointValid || !proxykit.IsValidCredentials(username, password) {
-		return scheme, host, username, password, ErrInvalidProxyFormat
+	if !endpointValid || !proxykit.IsValidCredentialsFor(scheme, username, password) {
+		parsed := proxykit.Proxy{Scheme: scheme, Host: host, Username: username, Password: password}
+		return scheme, host, username, password, invalidProxyFormat(parsed.Validate())
 	}
 	return scheme, host, username, password, nil
 }
@@ -497,6 +522,9 @@ func assignField(proxy *proxykit.Proxy, field byte, val string) {
 	switch field {
 	case 't':
 		proxy.Scheme = proxykit.ProxyScheme(val)
+		if !proxy.Scheme.IsValid() {
+			proxy.Scheme, _ = schemeOf(val)
+		}
 	case 'h', 'd':
 		if proxy.Host == "" {
 			proxy.Host = val
@@ -507,6 +535,44 @@ func assignField(proxy *proxykit.Proxy, field byte, val string) {
 		proxy.Username = val
 	case 'p':
 		proxy.Password = val
+	}
+}
+
+// schemeOf canonicalizes s with [proxykit.ParseScheme]. When s is not a
+// supported scheme it returns the raw value, so that validation reports it,
+// and false. Callers test the canonical form inline first and call schemeOf
+// only for other input.
+func schemeOf(s string) (proxykit.ProxyScheme, bool) {
+	if scheme, ok := proxykit.ParseScheme(s); ok {
+		return scheme, true
+	}
+	return proxykit.ProxyScheme(s), false
+}
+
+// Pre-wrapped [ErrInvalidProxyFormat] errors, one per [proxykit.Proxy.Validate]
+// sentinel, so that wrapping adds no allocation of its own.
+var (
+	errInvalidScheme      = fmt.Errorf("%w: %w", ErrInvalidProxyFormat, proxykit.ErrInvalidScheme)
+	errInvalidHost        = fmt.Errorf("%w: %w", ErrInvalidProxyFormat, proxykit.ErrInvalidHost)
+	errInvalidPort        = fmt.Errorf("%w: %w", ErrInvalidProxyFormat, proxykit.ErrInvalidPort)
+	errInvalidCredentials = fmt.Errorf("%w: %w", ErrInvalidProxyFormat, proxykit.ErrInvalidCredentials)
+)
+
+// invalidProxyFormat returns the [ErrInvalidProxyFormat] error that wraps err,
+// a [proxykit.Proxy.Validate] sentinel, so that callers can match either with
+// errors.Is. It does not allocate.
+func invalidProxyFormat(err error) error {
+	switch err {
+	case proxykit.ErrInvalidScheme:
+		return errInvalidScheme
+	case proxykit.ErrInvalidHost:
+		return errInvalidHost
+	case proxykit.ErrInvalidPort:
+		return errInvalidPort
+	case proxykit.ErrInvalidCredentials:
+		return errInvalidCredentials
+	default:
+		return ErrInvalidProxyFormat
 	}
 }
 

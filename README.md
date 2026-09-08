@@ -24,7 +24,7 @@ go get github.com/colduction/proxykit-go@latest
 ```
 
 > [!TIP]
-> Requires Go 1.26 or later.
+> Requires Go 1.27 or later.
 
 ## Packages
 
@@ -53,22 +53,42 @@ func main() {
 		Password: "pass",
 	}
 	if proxy.IsValid() {
-		fmt.Println(proxy.ExportURL())
+		fmt.Println(proxy.ExportURL().Redacted())
 	}
 }
 ```
 
-Supported schemes: `http`, `https`, `socks5`, `socks5h`.
+Supported schemes: `http`, `https`, `socks4`, `socks4a`, `socks5`, `socks5h`.
+`https` is an HTTP proxy reached over TLS. `socks4a` and `socks5h` ask the proxy
+to resolve host names; note that net/http treats `socks5` like `socks5h`.
+`ParseScheme` folds case, and `DefaultPort` reports 80, 443, or 1080.
 
 > [!IMPORTANT]
 > Use `host:port` for DNS/IPv4 and `[ipv6]:port` for IPv6.
 
 Host validation accepts ASCII DNS names, IPv4, and IPv6. DNS labels follow LDH
-rules, with 63-byte labels and DNS presentation-length limits. Root-dot names
-and IPv6 zone IDs are supported.
+rules, with 63-byte labels and DNS presentation-length limits. Names whose
+final label is all digits must be valid dotted-decimal IPv4. Root-dot names
+are supported. IPv6 zone IDs use the raw form (`[fe80::1%eth0]:80`) with
+unreserved characters only; `ExportURL` keeps that form in `url.URL.Host`, and
+`url.URL.String` percent-encodes it.
 
 Helpers include `IsValidScheme`, `IsValidHost`, `IsValidHostnamePort`,
 `IsValidCredentials`, and `SplitHostnamePort`.
+
+`Validate` returns the first failing sentinel (`ErrInvalidScheme`, `ErrInvalidHost`,
+`ErrInvalidPort`, `ErrInvalidCredentials`) and allocates only when rejecting a
+malformed bracketed IPv6 literal; `IsValid` is its boolean form.
+
+`FromURL` is the inverse of `ExportURL` for URLs from `url.Parse` or
+`http.ProxyFromEnvironment`, filling a missing or empty port from
+`DefaultPort`.
+
+Credentials are printable ASCII of at most 255 bytes each. `IsValidCredentialsFor`
+adds scheme rules: no colon in an HTTP Basic username (RFC 7617), and no password
+for SOCKS4 or SOCKS4A. A `Proxy` or `*Proxy` logged through `log/slog` as an
+attribute value redacts its password via `LogValue`; slices and struct fields
+holding one, and every encoder tag, serialize it in plaintext.
 
 ## Parser
 
@@ -101,16 +121,21 @@ Supported verbs:
 | `%%` | Literal `%` |
 
 `strict=true` requires an exact format match. Lenient mode tolerates missing
-optional credentials or ports after parsing scheme and host. Use `ParseString`
-for a value result, `ParseInto` for caller-owned reuse, and `ParseBytes` for
-zero-copy input.
+optional credentials after parsing scheme and host and ignores delimiter
+mismatches and trailing input; the result must still pass `Validate`, so a port
+is always required.
+
+Use `ParseString` for a value result, `ParseInto` for caller-owned reuse, and
+`ParseBytes` for zero-copy input.
 
 > [!WARNING]
 > `ParseBytes` aliases its input. Keep input immutable while parsed fields remain
 > in use; concurrent calls need distinct destinations.
 
 Use `errors.Is` for sentinels such as `ErrInvalidProxyFormat`, and
-`errors.As`/`errors.AsType` for typed parse errors.
+`errors.As`/`errors.AsType` for typed parse errors. `ErrInvalidProxyFormat` wraps
+the `proxykit` sentinel that failed, so `errors.Is(err, proxykit.ErrInvalidPort)`
+also works. Scheme verbs match case-insensitively and store the lowercase form.
 
 ## Pool
 
