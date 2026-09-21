@@ -5,6 +5,8 @@
 **Fast, allocation-aware Go tools for HTTP and SOCKS proxies.**
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/colduction/proxykit-go.svg)](https://pkg.go.dev/github.com/colduction/proxykit-go)
+![Go 1.27+](https://img.shields.io/badge/go-1.27%2B-00ADD8?logo=go&logoColor=white)
+![Dependencies: none](https://img.shields.io/badge/dependencies-none-brightgreen)
 [![License](https://img.shields.io/github/license/colduction/proxykit-go)](LICENSE)
 
 Validate &middot; Parse &middot; Iterate
@@ -136,6 +138,45 @@ Use `errors.Is` for sentinels such as `ErrInvalidProxyFormat`, and
 `errors.As`/`errors.AsType` for typed parse errors. `ErrInvalidProxyFormat` wraps
 the `proxykit` sentinel that failed, so `errors.Is(err, proxykit.ErrInvalidPort)`
 also works. Scheme verbs match case-insensitively and store the lowercase form.
+
+### Performance
+
+Valid input in a common shape (lowercase scheme, DNS name or dotted IPv4 host)
+takes a fast path that tests eight bytes per machine word. For a format with
+credentials or custom delimiters and input of at most 64 bytes, it first builds
+a structural index, one bitmap per byte class, with a vector kernel, then
+resolves delimiters and whole ranges with bit operations. Every tier produces
+identical results, and the byte-wise parser still decides everything else,
+including every validation error.
+
+| Tier           | Where                                      | How                                       |
+| -------------- | ------------------------------------------ | ----------------------------------------- |
+| AVX-512 / AVX2 | amd64, detected at start, input ≤ 64 B     | hand-written Go assembly, no dependencies |
+| NEON           | arm64, input ≤ 64 B                        | hand-written Go assembly                  |
+| Word-at-a-time | every platform, any input length, `purego` | pure Go, eight bytes per 64-bit word      |
+
+`ParseInto`, ns/op, 0 allocs, Ryzen 9 7950X, go1.27.1 windows/amd64,
+`-cpu 1 -count 10`, medians from `benchstat`:
+
+| Input                                          | Before | Pure Go | AVX2 | AVX-512 |
+| ---------------------------------------------- | -----: | ------: | ---: | ------: |
+| `http://192.0.2.146:8080`                      |   35.7 |    12.3 | 12.3 |    12.3 |
+| `http://proxy.example.com:8080`                |   30.4 |    12.4 | 12.4 |    12.4 |
+| `socks5://alice:s3cr3t@203.0.113.27:1080`      |   54.2 |    21.1 | 25.1 |    22.1 |
+| `socks5://alice:s3cr3t@proxy.example.com:1080` |   45.7 |    19.7 | 18.2 |    15.1 |
+| 92-byte residential line                       |   64.8 |    28.4 | 28.5 |    28.5 |
+| 1024 mixed lines, varied shape                 |   60.8 |    24.4 | 22.7 |    20.6 |
+| lenient, credentials absent                    |   51.6 |    35.0 | 29.2 |    28.9 |
+| `(%t)%h:%d:%u:%p` custom delimiters            |   74.4 |    53.4 | 50.3 |    49.3 |
+| `http://[2001:db8::1]:8080`                    |   31.5 |    35.4 | 35.4 |    35.4 |
+
+An IPv6 literal and invalid input try the fast path first and then take the
+byte-wise parser, which costs about 1 to 4 ns more than before, up to 30% on
+the cheapest error paths. NEON is verified for
+correctness on linux/arm64 under emulation; its speed is not measured here.
+Select a tier in the package benchmarks with
+`PROXYKIT_BACKEND=portable|avx2|avx512|neon go test ./proxyparser -bench .`;
+build with `-tags purego` to exclude the assembly.
 
 ## Pool
 

@@ -11,7 +11,7 @@ import (
 	"github.com/colduction/proxykit-go/proxyparser"
 )
 
-func mustNew(t *testing.T, format string, strict bool) *proxyparser.Parse {
+func mustNew(t testing.TB, format string, strict bool) *proxyparser.Parse {
 	t.Helper()
 	p, err := proxyparser.New(format, strict)
 	if err != nil {
@@ -732,6 +732,70 @@ func BenchmarkParseInto_NilDestination(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		_ = p.ParseInto(input, nil)
+	}
+}
+
+func BenchmarkParseInto_Shapes(b *testing.B) {
+	shapes := []struct {
+		name, format, input string
+		strict              bool
+	}{
+		{"ipv4", "%t://%h:%d", "http://192.0.2.146:8080", true},
+		{"name", "%t://%h:%d", "http://proxy.example.com:8080", true},
+		{"ipv4-credentials", "%t://%u:%p@%h:%d", "socks5://alice:s3cr3t@203.0.113.27:1080", true},
+		{"name-credentials", "%t://%u:%p@%h:%d", "socks5://alice:s3cr3t@proxy.example.com:1080", true},
+		{"residential", "%t://%u:%p@%h:%d", "http://customer-alice-cc-us-sessid-8f3a91c2d7:Zx9kQ2mP7vL4@gate.residential.example.net:7777", true},
+		{"ipv6", "%t://%h:%d", "http://[2001:db8::1]:8080", true},
+		{"lenient-no-credentials", "%t://%u:%p@%h:%d", "http://proxy.example.com:3128", false},
+		{"auto-scheme", "%h:%d", "http://192.0.2.146:3128", false},
+		{"custom-delimiters", "(%t)%h:%d:%u:%p", "(http)res-us.lightningproxies.net:9999:admin:pass", false},
+	}
+	for _, shape := range shapes {
+		b.Run(shape.name, func(b *testing.B) {
+			p, err := proxyparser.New(shape.format, shape.strict)
+			if err != nil {
+				b.Fatal(err)
+			}
+			var proxy proxykit.Proxy
+			if err := p.ParseInto(shape.input, &proxy); err != nil {
+				b.Fatal(err)
+			}
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = p.ParseInto(shape.input, &proxy)
+			}
+		})
+	}
+}
+
+// BenchmarkParseInto_Mixed cycles through lines of varied length and shape so
+// that branch history from one line does not predict the next.
+func BenchmarkParseInto_Mixed(b *testing.B) {
+	p, err := proxyparser.New("%t://%u:%p@%h:%d", true)
+	if err != nil {
+		b.Fatal(err)
+	}
+	schemes := []string{"http", "https", "socks5", "socks5h"}
+	lines := make([]string, 1024)
+	for i := range lines {
+		state := uint32(i)*2654435761 + 12345
+		host := fmt.Sprintf("%d.%d.%d.%d", 1+state>>24%223, state>>16&255, state>>8&255, 1+state&253)
+		if i%3 != 0 {
+			host = fmt.Sprintf("%s%d.pool-%d.example.%s", strings.Repeat("n", 1+i%9), i, state%97, []string{"com", "net", "io"}[i%3])
+		}
+		lines[i] = fmt.Sprintf("%s://user%d:%s@%s:%d", schemes[i%len(schemes)], state%100000, strings.Repeat("p", 4+i%13), host, 1+state%65535)
+	}
+	var proxy proxykit.Proxy
+	for _, line := range lines {
+		if err := p.ParseInto(line, &proxy); err != nil {
+			b.Fatalf("ParseInto(%q): %v", line, err)
+		}
+	}
+	b.ReportAllocs()
+	var next int
+	for b.Loop() {
+		_ = p.ParseInto(lines[next&1023], &proxy)
+		next++
 	}
 }
 

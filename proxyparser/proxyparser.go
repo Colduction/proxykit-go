@@ -9,6 +9,7 @@ import (
 	"unsafe"
 
 	"github.com/colduction/proxykit-go"
+	"github.com/colduction/proxykit-go/internal/structuralindex"
 )
 
 var (
@@ -79,7 +80,12 @@ const (
 	parserStrictFullCredentials
 )
 
-const noPlanIndex uint32 = ^uint32(0)
+const (
+	noPlanIndex uint32 = ^uint32(0)
+
+	noClass              = structuralindex.Class(0xff)
+	schemeSeparatorClass = structuralindex.Class(0xfe)
+)
 
 // parseOp stores pointer-free offsets into Parse.format. A zero field
 // marks a delimiter state; any other field marks a capture state.
@@ -89,6 +95,7 @@ type parseOp struct {
 	credentialEnd    uint32
 	field            byte
 	delimiterByte    byte
+	delimiterClass   structuralindex.Class
 	consumeDelimiter bool
 }
 
@@ -156,9 +163,16 @@ func New(format string, strict bool) (*Parse, error) {
 			plan = append(plan, parseOp{
 				delimiterStart:  uint32(start),
 				delimiterLength: uint32(i - start),
+				delimiterClass:  noClass,
 			})
+			op := &plan[len(plan)-1]
 			if i-start == 1 {
-				plan[len(plan)-1].delimiterByte = format[start]
+				op.delimiterByte = format[start]
+				if class, ok := structuralindex.ClassOf(format[start]); ok {
+					op.delimiterClass = class
+				}
+			} else if format[start:i] == schemeSeparator {
+				op.delimiterClass = schemeSeparatorClass
 			}
 			continue
 		}
@@ -180,6 +194,7 @@ func New(format string, strict bool) (*Parse, error) {
 				delimiterStart:  uint32(i),
 				delimiterLength: 1,
 				delimiterByte:   '%',
+				delimiterClass:  noClass,
 			})
 		default:
 			return nil, ErrInvalidFormatVerb(verb)
@@ -190,6 +205,7 @@ func New(format string, strict bool) (*Parse, error) {
 		nextDelimiterByte                       byte
 		nextDelimiterStart, nextDelimiterLength uint32
 	)
+	nextDelimiterClass := noClass
 	nextDelimiter, credentialEnd := noPlanIndex, noPlanIndex
 	for i := len(plan) - 1; i >= 0; i-- {
 		op := &plan[i]
@@ -198,6 +214,7 @@ func New(format string, strict bool) (*Parse, error) {
 			nextDelimiterStart = op.delimiterStart
 			nextDelimiterLength = op.delimiterLength
 			nextDelimiterByte = op.delimiterByte
+			nextDelimiterClass = op.delimiterClass
 			if op.delimiterLength == 1 && op.delimiterByte == '@' {
 				credentialEnd = uint32(i)
 			}
@@ -206,6 +223,7 @@ func New(format string, strict bool) (*Parse, error) {
 		op.delimiterStart = nextDelimiterStart
 		op.delimiterLength = nextDelimiterLength
 		op.delimiterByte = nextDelimiterByte
+		op.delimiterClass = nextDelimiterClass
 		op.credentialEnd = credentialEnd
 		op.consumeDelimiter = nextDelimiter == uint32(i+1)
 	}
@@ -223,71 +241,18 @@ func (pp *Parse) Parse(input string) (*proxykit.Proxy, error) {
 	if pp == nil {
 		return nil, nil
 	}
-	switch pp.kind {
-	case parserStrictSchemeHostPort:
-		before, after, ok := strings.Cut(input, "://")
-		if !ok {
-			return nil, ErrSubseqDelimNotFound("://")
-		}
-		scheme := proxykit.ProxyScheme(before)
-		schemeOK := scheme.IsValid()
-		if !schemeOK {
-			scheme, schemeOK = schemeOf(before)
-		}
-		endpointValid := schemeOK && proxykit.IsValidHostnamePort(after)
-		if !endpointValid && strings.LastIndexByte(after, ':') < 0 {
-			return nil, ErrSubseqDelimNotFound(":")
-		}
-		if !endpointValid {
-			return nil, invalidProxyFormat((&proxykit.Proxy{Scheme: scheme, Host: after}).Validate())
-		}
-		return &proxykit.Proxy{Scheme: scheme, Host: after}, nil
-	case parserStrictFullCredentials:
-		schemeEnd := strings.Index(input, "://")
-		if schemeEnd < 0 {
-			return nil, ErrSubseqDelimNotFound("://")
-		}
-		usernameStart := schemeEnd + 3
-		usernameEnd := strings.IndexByte(input[usernameStart:], ':')
-		if usernameEnd < 0 {
-			return nil, ErrSubseqDelimNotFound(":")
-		}
-		usernameEnd += usernameStart
-		passwordStart := usernameEnd + 1
-		passwordEnd := strings.IndexByte(input[passwordStart:], '@')
-		if passwordEnd < 0 {
-			return nil, ErrSubseqDelimNotFound("@")
-		}
-		passwordEnd += passwordStart
-		host := input[passwordEnd+1:]
-		scheme := proxykit.ProxyScheme(input[:schemeEnd])
-		schemeOK := scheme.IsValid()
-		if !schemeOK {
-			scheme, schemeOK = schemeOf(input[:schemeEnd])
-		}
-		endpointValid := schemeOK && proxykit.IsValidHostnamePort(host)
-		if !endpointValid && strings.LastIndexByte(host, ':') < 0 {
-			return nil, ErrSubseqDelimNotFound(":")
-		}
-		username, password := input[usernameStart:usernameEnd], input[passwordStart:passwordEnd]
-		if !endpointValid || !proxykit.IsValidCredentialsFor(scheme, username, password) {
-			parsed := proxykit.Proxy{Scheme: scheme, Host: host, Username: username, Password: password}
-			return nil, invalidProxyFormat(parsed.Validate())
-		}
-		return &proxykit.Proxy{Scheme: scheme, Host: host, Username: username, Password: password}, nil
-	default:
-		var parsed proxykit.Proxy
-		if err := pp.ParseInto(input, &parsed); err != nil {
-			return nil, err
-		}
-		return new(parsed), nil
+	var parsed proxykit.Proxy
+	if err := pp.parseInto(input, &parsed, true); err != nil {
+		return nil, err
 	}
+	return new(parsed), nil
 }
 
 // ParseString implements [Parser.ParseString].
-func (pp *Parse) ParseString(input string) (proxykit.Proxy, error) {
-	var proxy proxykit.Proxy
-	err := pp.ParseInto(input, &proxy)
+func (pp *Parse) ParseString(input string) (proxy proxykit.Proxy, err error) {
+	if pp != nil {
+		err = pp.parseInto(input, &proxy, true)
+	}
 	return proxy, err
 }
 
@@ -304,17 +269,38 @@ func (pp *Parse) ParseInto(input string, proxy *proxykit.Proxy) error {
 	if proxy == nil {
 		return ErrNilProxy
 	}
-	proxy.Reset()
+	return pp.parseInto(input, proxy, true)
+}
+
+func (pp *Parse) parseInto(input string, proxy *proxykit.Proxy, fast bool) error {
+	// The fast paths handle input they prove valid and leave everything else,
+	// including every validation error, to the scalar code below. fast is
+	// false only in tests, which compare the two.
 	switch pp.kind {
 	case parserStrictSchemeHostPort:
+		if fast {
+			if handled, err := parseStrictFast(input, proxy, false); handled {
+				return err
+			}
+		}
 		scheme, host, err := parseStrictSchemeHostPort(input)
-		proxy.Scheme, proxy.Host = scheme, host
+		*proxy = proxykit.Proxy{Scheme: scheme, Host: host}
 		return err
 	case parserStrictFullCredentials:
+		if fast {
+			if handled, err := parseStrictFast(input, proxy, true); handled {
+				return err
+			}
+		}
 		scheme, host, username, password, err := parseStrictFullCredentials(input)
-		proxy.Scheme, proxy.Host, proxy.Username, proxy.Password = scheme, host, username, password
+		*proxy = proxykit.Proxy{Scheme: scheme, Host: host, Username: username, Password: password}
 		return err
 	}
+	proxy.Reset()
+	// With an index, the bytes it classifies are found in its bitmaps; every
+	// lookup returns what the strings search it replaces would return.
+	var ix structuralindex.Index
+	indexed := fast && ix.Build(input)
 	var (
 		inputPos     int
 		hostStart    int = -1
@@ -323,7 +309,7 @@ func (pp *Parse) ParseInto(input string, proxy *proxykit.Proxy) error {
 		schemeParsed bool
 	)
 	if !pp.strict && !pp.hasScheme {
-		idx := strings.Index(input, "://")
+		idx := indexSchemeSeparator(&ix, indexed, input, 0)
 		if idx < 0 {
 			return ErrSchemeNotParsed
 		}
@@ -363,7 +349,7 @@ func (pp *Parse) ParseInto(input string, proxy *proxykit.Proxy) error {
 		delimiterLength := int(op.delimiterLength)
 		var nextDelimiter string
 		if !pp.strict && (op.field == 'u' || op.field == 'p') && op.credentialEnd != noPlanIndex {
-			if strings.IndexByte(input[inputPos:], '@') < 0 {
+			if indexByteFrom(&ix, indexed, input, inputPos, '@', structuralindex.At) < 0 {
 				i = int(op.credentialEnd)
 				continue
 			}
@@ -371,11 +357,15 @@ func (pp *Parse) ParseInto(input string, proxy *proxykit.Proxy) error {
 		idx := -1
 		if delimiterLength != 0 {
 			if delimiterLength == 1 {
-				idx = strings.IndexByte(input[start:], op.delimiterByte)
+				idx = indexByteFrom(&ix, indexed, input, start, op.delimiterByte, op.delimiterClass)
 			} else {
 				delimiterStart := int(op.delimiterStart)
 				nextDelimiter = format[delimiterStart : delimiterStart+delimiterLength]
-				idx = strings.Index(input[start:], nextDelimiter)
+				if op.delimiterClass == schemeSeparatorClass {
+					idx = indexSchemeSeparator(&ix, indexed, input, start)
+				} else {
+					idx = strings.Index(input[start:], nextDelimiter)
+				}
 			}
 		}
 		if !pp.strict && delimiterLength != 0 && idx == -1 {
@@ -387,7 +377,7 @@ func (pp *Parse) ParseInto(input string, proxy *proxykit.Proxy) error {
 				hostParsed = hostParsed || start < len(input)
 				inputPos = len(input)
 			case 'u':
-				if at := strings.IndexByte(input[start:], '@'); at >= 0 {
+				if at := indexByteFrom(&ix, indexed, input, start, '@', structuralindex.At); at >= 0 {
 					assignField(proxy, 'u', input[start:start+at])
 					inputPos = start + at
 				} else if delimiterLength == 1 && op.delimiterByte == ':' {
@@ -395,7 +385,7 @@ func (pp *Parse) ParseInto(input string, proxy *proxykit.Proxy) error {
 					inputPos = len(input)
 				}
 			case 'p':
-				if at := strings.IndexByte(input[start:], '@'); at == 0 {
+				if at := indexByteFrom(&ix, indexed, input, start, '@', structuralindex.At); at == 0 {
 					assignField(proxy, 'p', "")
 				} else if at > 0 {
 					assignField(proxy, 'p', input[start:start+at])
@@ -456,6 +446,9 @@ func (pp *Parse) ParseInto(input string, proxy *proxykit.Proxy) error {
 		if !hostParsed || proxy.Host == "" {
 			return ErrHostNotParsed
 		}
+	}
+	if fast && isValidFast(&ix, indexed, input, proxy) {
+		return nil
 	}
 	if err := proxy.Validate(); err != nil {
 		return invalidProxyFormat(err)
