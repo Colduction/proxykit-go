@@ -8,7 +8,8 @@ const (
 	// Portable uses no vector kernel: [Index.Build] reports false
 	// and callers rely on [IsHostName] and [IsPrintable].
 	Portable Backend = iota
-	// AVX2 is the amd64 kernel for 256-bit vectors.
+	// AVX2 is the amd64 kernel for 256-bit vectors. It also requires POPCNT,
+	// BMI1, and LZCNT.
 	AVX2
 	// AVX512 is the amd64 kernel for 512-bit vectors with byte masks.
 	AVX512

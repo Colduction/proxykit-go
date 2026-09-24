@@ -244,11 +244,22 @@ func isHostPort(ix *structuralindex.Index, indexed bool, input string, start int
 	if port := tail & (1<<(digits*8) - 1); port > wordMaxPort || port&(0x0f*eachByte) == 0 {
 		return false
 	}
-	// A final label of digits must belong to an IPv4 address. Deciding by the
-	// last byte alone sends the rare name such as "proxy1" to the scalar
-	// parser, which is correct though slower.
+	// A final label of digits must belong to an IPv4 address. A DNS label
+	// ending in digits remains a hostname when another label byte is not a digit.
 	if last := input[hostEnd-1]; last-'0' <= 9 {
-		return isIPv4(input[start:hostEnd])
+		if isIPv4(input[start:hostEnd]) {
+			return true
+		}
+		numeric := true
+		for i := hostEnd - 1; i >= start && input[i] != '.'; i-- {
+			if input[i]-'0' > 9 {
+				numeric = false
+				break
+			}
+		}
+		if numeric {
+			return false
+		}
 	}
 	if !indexed {
 		return structuralindex.IsHostName(input[start:hostEnd])

@@ -5,8 +5,8 @@
 **Fast, allocation-aware Go tools for HTTP and SOCKS proxies.**
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/colduction/proxykit-go.svg)](https://pkg.go.dev/github.com/colduction/proxykit-go)
-![Go 1.27+](https://img.shields.io/badge/go-1.27%2B-00ADD8?logo=go&logoColor=white)
-![Dependencies: none](https://img.shields.io/badge/dependencies-none-brightgreen)
+[![Go 1.27+](https://img.shields.io/badge/go-1.27%2B-00ADD8?logo=go&logoColor=white)](go.mod)
+[![Dependencies: none](https://img.shields.io/badge/dependencies-none-brightgreen)](go.mod)
 [![License](https://img.shields.io/github/license/colduction/proxykit-go)](LICENSE)
 
 Validate &middot; Parse &middot; Iterate
@@ -24,9 +24,6 @@ Validate &middot; Parse &middot; Iterate
 ```bash
 go get github.com/colduction/proxykit-go@latest
 ```
-
-> [!TIP]
-> Requires Go 1.27 or later.
 
 ## Packages
 
@@ -122,13 +119,14 @@ Supported verbs:
 | `%p` | Password    |
 | `%%` | Literal `%` |
 
-`strict=true` requires an exact format match. Lenient mode tolerates missing
-optional credentials after parsing scheme and host and ignores delimiter
-mismatches and trailing input; the result must still pass `Validate`, so a port
-is always required.
+`strict=true` requires an exact format match. Lenient mode accepts omitted
+credentials, including a username without a password, and ignores delimiter
+mismatches and trailing input. The result must still pass `Validate`, so a port
+is always required. Bracketed IPv6 hosts also work with custom delimiters.
 
 Use `ParseString` for a value result, `ParseInto` for caller-owned reuse, and
-`ParseBytes` for zero-copy input.
+`ParseBytes` to avoid copying the input into a string. Joining nonadjacent host
+and port fields still allocates a string.
 
 > [!WARNING]
 > `ParseBytes` aliases its input. Keep input immutable while parsed fields remain
@@ -155,25 +153,10 @@ including every validation error.
 | NEON           | arm64, input ≤ 64 B                        | hand-written Go assembly                  |
 | Word-at-a-time | every platform, any input length, `purego` | pure Go, eight bytes per 64-bit word      |
 
-`ParseInto`, ns/op, 0 allocs, Ryzen 9 7950X, go1.27.1 windows/amd64,
-`-cpu 1 -count 10`, medians from `benchstat`:
+The fast path also accepts DNS labels ending in digits, such as `proxy1`.
+IPv6 literals and invalid input use the scalar parser. See [performance and
+validation](PERFORMANCE.md) for benchmark commands, workloads, and test coverage.
 
-| Input                                          | Before | Pure Go | AVX2 | AVX-512 |
-| ---------------------------------------------- | -----: | ------: | ---: | ------: |
-| `http://192.0.2.146:8080`                      |   35.7 |    12.3 | 12.3 |    12.3 |
-| `http://proxy.example.com:8080`                |   30.4 |    12.4 | 12.4 |    12.4 |
-| `socks5://alice:s3cr3t@203.0.113.27:1080`      |   54.2 |    21.1 | 25.1 |    22.1 |
-| `socks5://alice:s3cr3t@proxy.example.com:1080` |   45.7 |    19.7 | 18.2 |    15.1 |
-| 92-byte residential line                       |   64.8 |    28.4 | 28.5 |    28.5 |
-| 1024 mixed lines, varied shape                 |   60.8 |    24.4 | 22.7 |    20.6 |
-| lenient, credentials absent                    |   51.6 |    35.0 | 29.2 |    28.9 |
-| `(%t)%h:%d:%u:%p` custom delimiters            |   74.4 |    53.4 | 50.3 |    49.3 |
-| `http://[2001:db8::1]:8080`                    |   31.5 |    35.4 | 35.4 |    35.4 |
-
-An IPv6 literal and invalid input try the fast path first and then take the
-byte-wise parser, which costs about 1 to 4 ns more than before, up to 30% on
-the cheapest error paths. NEON is verified for
-correctness on linux/arm64 under emulation; its speed is not measured here.
 Select a tier in the package benchmarks with
 `PROXYKIT_BACKEND=portable|avx2|avx512|neon go test ./proxyparser -bench .`;
 build with `-tags purego` to exclude the assembly.
@@ -203,13 +186,16 @@ for {
 
 | Mode             | Behavior                                          |
 | ---------------- | ------------------------------------------------- |
-| `ModeSequential` | File order, bounded `bufio.Reader`                |
+| `ModeSequential` | File order, one block at a time                   |
 | `ModeShuffled`   | Locality-preserving region/block/line permutation |
 
-Shuffled mode uses bounded working memory and no sidecar index. It opens in
-constant time and loads blocks lazily. Order is not a uniform global line
-permutation. `MaxLineBytes` bounds returned line size; oversized lines return
-`ErrLineTooLong`.
+Both modes read the file one block at a time, 1 MiB sequential and 4 MiB
+shuffled by default, index the block's line feeds with a vector kernel, and
+keep one block plus 4-byte line offsets. A pool opens in constant time, loads
+blocks lazily, and uses no sidecar index, memory map, or goroutine. Shuffled
+order is not a uniform global line permutation. `MaxLineBytes` bounds returned
+line size; an oversized line returns `ErrLineTooLong` when its block loads,
+which may precede earlier lines of that block.
 
 > [!CAUTION]
 > Source files must remain immutable while a pool is open.
@@ -231,7 +217,27 @@ for {
 }
 ```
 
-Configure shuffled pools with `Open`:
+Take a whole block at a time with `NextBatch`, the fastest way through a file.
+It hands the block over under one lock, and `Lines` yields views of its lines
+in the order `Next` would return them, without a copy or an allocation once
+the batch is warm:
+
+```go
+var batch proxypool.Batch
+for {
+	if err := pool.NextBatch(&batch); err != nil {
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		return err
+	}
+	for line := range batch.Lines() {
+		consume(line) // valid until batch is passed to NextBatch again
+	}
+}
+```
+
+Configure pools with `Open`:
 
 ```go
 pool, err := proxypool.Open("proxies.txt", proxypool.Options{
@@ -241,14 +247,21 @@ pool, err := proxypool.Open("proxies.txt", proxypool.Options{
 	RegionBytes:  1 << 30,
 	MaxLineBytes: 64 << 10,
 	Seed:         12345,
+	Prefetch:     true,
 })
 ```
 
-`Stats` reports file size, blocks, regions, cursor, cycle, seed, retained
-capacity, limits, shard configuration, and closed state. `Reset` restores cycle
-zero and clears terminal read errors after source validation. Size and
-modification-time checks run at bounded checkpoints. Non-EOF errors remain
-terminal until `Reset` succeeds.
+`Prefetch` reads ahead while a block is consumed, for files the system cache
+does not hold. Linux gets `POSIX_FADV_WILLNEED` and macOS `F_RDADVISE` for the
+next block. On Windows, `NextBatch` keeps overlapped reads of the next blocks
+in flight on a second handle, unbuffered when the file is larger than the
+memory available to cache it; a pool then keeps up to three more blocks.
+
+`Stats` reports file size, blocks, regions, cursor, cycle, seed, retained and
+maximum memory, limits, shard configuration, prefetching, and closed state.
+`Reset` restores cycle zero and clears terminal read errors after source
+validation. Size and modification-time checks run at bounded checkpoints.
+Non-EOF errors remain terminal until `Reset` succeeds.
 
 For parallel storage reads, use pools with matching source, `BlockBytes`,
 `RegionBytes`, nonzero `Seed`, and `ShardCount`, assigning each

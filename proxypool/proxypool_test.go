@@ -661,7 +661,7 @@ func TestStatsMemoryBound(t *testing.T) {
 	if stats.Cursor != 1 || stats.Blocks != 1 || stats.Regions != 1 {
 		t.Fatalf("Stats = %+v", stats)
 	}
-	if want := int64(4096 + (4096+1)*4); stats.RetainedBytes != want {
+	if want := int64(4099 + (4096+1)*4); stats.RetainedBytes != want {
 		t.Fatalf("RetainedBytes = %d, want %d", stats.RetainedBytes, want)
 	}
 }

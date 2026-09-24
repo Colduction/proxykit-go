@@ -118,8 +118,9 @@ type Parser interface {
 	// ParseBytes parses input into dst without converting input to an
 	// allocated string.
 	//
-	// Parsed string fields alias input, except that a scheme canonicalized by
-	// [proxykit.ParseScheme] is a constant. Concurrent calls must use distinct
+	// Parsed string fields may alias input. A scheme canonicalized by
+	// [proxykit.ParseScheme] is a constant, and joining nonadjacent host and port
+	// fields allocates a separate string. Concurrent calls must use distinct
 	// destinations, and callers must keep input immutable while any parsed dst is
 	// in use. When ParseBytes returns a non-nil error the contents of dst are
 	// unspecified.
@@ -139,11 +140,13 @@ type Parse struct {
 //
 // Format accepts %t for scheme, %h for host, %d for port, %u for username,
 // %p for password, and %% for a literal percent sign.
+// A bracketed IPv6 host is captured through its closing bracket before
+// searching for the next delimiter.
 //
-// In strict mode, input must match format exactly. In lenient mode, missing
-// credentials are tolerated after a scheme and host are parsed, delimiter
-// mismatches and trailing input are ignored, and the final proxy must still
-// pass [proxykit.Proxy.IsValid].
+// In strict mode, input must match format exactly.
+// In lenient mode, credentials may be absent, and a %u:%p@ group also accepts
+// username@ with an empty password. Delimiter mismatches and trailing input
+// are ignored, and the final proxy must still pass [proxykit.Proxy.IsValid].
 func New(format string, strict bool) (*Parse, error) {
 	if uint64(len(format)) > uint64(noPlanIndex) {
 		return nil, ErrFormatTooLong
@@ -348,15 +351,26 @@ func (pp *Parse) parseInto(input string, proxy *proxykit.Proxy, fast bool) error
 		start := inputPos
 		delimiterLength := int(op.delimiterLength)
 		var nextDelimiter string
+		credentialAt := -1
 		if !pp.strict && (op.field == 'u' || op.field == 'p') && op.credentialEnd != noPlanIndex {
-			if indexByteFrom(&ix, indexed, input, inputPos, '@', structuralindex.At) < 0 {
+			credentialAt = indexByteFrom(&ix, indexed, input, inputPos, '@', structuralindex.At)
+			if credentialAt < 0 {
 				i = int(op.credentialEnd)
 				continue
 			}
 		}
 		idx := -1
 		if delimiterLength != 0 {
-			if delimiterLength == 1 {
+			if op.field == 'h' && start < len(input) && input[start] == '[' {
+				tail := input[start:]
+				skip := strings.IndexByte(tail, ']') + 1
+				delimiterStart := int(op.delimiterStart)
+				nextDelimiter = format[delimiterStart : delimiterStart+delimiterLength]
+				idx = strings.Index(tail[skip:], nextDelimiter)
+				if idx >= 0 {
+					idx += skip
+				}
+			} else if delimiterLength == 1 {
 				idx = indexByteFrom(&ix, indexed, input, start, op.delimiterByte, op.delimiterClass)
 			} else {
 				delimiterStart := int(op.delimiterStart)
@@ -367,6 +381,16 @@ func (pp *Parse) parseInto(input string, proxy *proxykit.Proxy, fast bool) error
 					idx = strings.Index(input[start:], nextDelimiter)
 				}
 			}
+		}
+		if credentialAt >= 0 && op.field == 'u' && op.delimiterByte == ':' &&
+			op.credentialEnd == uint32(i+3) && plan[i+2].field == 'p' && idx > credentialAt &&
+			indexByteFrom(&ix, indexed, input, start+idx+1, '@', structuralindex.At) < 0 {
+			// A colon after the only at sign belongs to the endpoint. Keep
+			// usernames containing at signs when a password separator exists.
+			proxy.Username, proxy.Password = input[start:start+credentialAt], ""
+			inputPos = start + credentialAt + 1
+			i = int(op.credentialEnd)
+			continue
 		}
 		if !pp.strict && delimiterLength != 0 && idx == -1 {
 			switch op.field {

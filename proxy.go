@@ -2,9 +2,7 @@
 // validation helpers.
 //
 // Validators run in O(len(input)) time and do not allocate for accepted
-// input, except that [netip.ParseAddr] may intern an IPv6 zone ID that no
-// live [netip.Addr] currently holds; the intern is weak, so it can recur
-// after garbage collection. Host names must be ASCII: convert
+// input. Host names must be ASCII: convert
 // internationalized names to A-labels, for example with
 // golang.org/x/net/idna, before validation.
 package proxykit
@@ -288,7 +286,7 @@ func FromURL(u *url.URL) (Proxy, error) {
 	if host == "" {
 		return Proxy{}, ErrInvalidHost
 	}
-	if u.Port() == "" {
+	if _, port, _, ok := SplitHostnamePort(host); !ok || port == "" {
 		host = strings.TrimSuffix(host, ":") + ":" + strconv.Itoa(int(scheme.DefaultPort()))
 	}
 	p := Proxy{Scheme: scheme, Host: host}
@@ -446,7 +444,7 @@ func (p *Proxy) IsZero() bool {
 // package sentinels; match them with [errors.Is]. Validate does not allocate
 // except when rejecting a malformed bracketed IPv6 literal, where
 // [netip.ParseAddr] allocates its error before it is mapped to
-// [ErrInvalidHost].
+// [ErrInvalidHost]. IPv6 zone validation does not intern zone IDs.
 func (p *Proxy) Validate() error {
 	if p == nil {
 		return ErrNilProxy
@@ -483,8 +481,6 @@ func IsValidHostnamePort(hnp string) bool {
 	return validateHostnamePort(hnp) == nil
 }
 
-// validateHostnamePort is the [IsValidHostnamePort] check with the failing
-// part reported as [ErrInvalidHost] or [ErrInvalidPort].
 func validateHostnamePort(hnp string) error {
 	if hnp == "" {
 		return ErrInvalidHost
@@ -551,36 +547,31 @@ func SplitHostnamePort(hnp string) (host, port string, bracketed, ok bool) {
 		return "", "", false, false
 	}
 	if hnp[0] == '[' {
-		for i := 1; i < length; i++ {
-			if hnp[i] != ']' {
-				continue
-			}
-			if i+1 >= length || hnp[i+1] != ':' {
-				return "", "", false, false
-			}
-			return hnp[1:i], hnp[i+2:], true, true
+		end := strings.IndexByte(hnp, ']')
+		if end < 0 || end+1 >= length || hnp[end+1] != ':' {
+			return "", "", false, false
 		}
+		return hnp[1:end], hnp[end+2:], true, true
+	}
+	colon := strings.IndexByte(hnp, ':')
+	if colon < 0 || strings.IndexByte(hnp[colon+1:], ':') >= 0 {
 		return "", "", false, false
 	}
-	for i := length - 1; i >= 0; i-- {
-		if hnp[i] != ':' {
-			continue
-		}
-		for j := range i {
-			if hnp[j] == ':' {
-				return "", "", false, false
-			}
-		}
-		return hnp[:i], hnp[i+1:], false, true
-	}
-	return "", "", false, false
+	return hnp[:colon], hnp[colon+1:], false, true
 }
 
-// isValidIPLiteral reports whether host is an IPv6 address text form without
-// brackets whose zone ID, if any, passes [isValidZone].
 func isValidIPLiteral(host string) bool {
+	if strings.IndexByte(host, ':') < 0 {
+		return false
+	}
+	if zone := strings.IndexByte(host, '%'); zone >= 0 {
+		if zone == len(host)-1 || !isValidZone(host[zone+1:]) {
+			return false
+		}
+		host = host[:zone]
+	}
 	addr, err := netip.ParseAddr(host)
-	return err == nil && addr.Is6() && isValidZone(addr.Zone())
+	return err == nil && addr.Is6()
 }
 
 // isValidZone reports whether zone contains only RFC 3986 unreserved bytes,
@@ -604,8 +595,9 @@ func isValidZone(zone string) bool {
 //
 // IPv6 text forms are parsed by [netip.ParseAddr]; a zone ID uses the raw
 // RFC 4007 form and may contain only RFC 3986 unreserved characters, the
-// ZoneID form RFC 6874 section 2 allows in URIs without percent-encoding. A
-// bare IPv6 address is valid here, but [IsValidHostnamePort] requires it
+// ZoneID form RFC 6874 section 2 allows in URIs without percent-encoding.
+// DNS length limits do not apply to zone IDs, and a final dot is part of the zone.
+// A bare IPv6 address is valid here, but [IsValidHostnamePort] requires it
 // bracketed once a port is attached. A name
 // whose final label is all digits must be a dotted-decimal IPv4 address of
 // four octets without leading zeros, the form [netip.ParseAddr] accepts,
@@ -619,6 +611,9 @@ func IsValidHost(host string) bool {
 	length := len(host)
 	if length == 0 {
 		return false
+	}
+	if strings.IndexByte(host, ':') >= 0 {
+		return isValidIPLiteral(host)
 	}
 	var rootDot bool
 	if host[length-1] == '.' {
@@ -634,9 +629,6 @@ func IsValidHost(host string) bool {
 	var labelStart int
 	for i := range length {
 		c := host[i]
-		if c == ':' {
-			return !rootDot && isValidIPLiteral(host)
-		}
 		if c == '.' {
 			if !isValidHostLabel(host, labelStart, i) {
 				return false

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -100,6 +101,8 @@ func TestIsValidHost(t *testing.T) {
 		{host: "2001:db8::1", valid: true},
 		{host: "::ffff:192.0.2.10", valid: true},
 		{host: "fe80::1%eth0", valid: true},
+		{host: "fe80::1%eth0.", valid: true},
+		{host: "fe80::1%" + strings.Repeat("z", 256), valid: true},
 		{host: "", valid: false},
 		{host: ".", valid: false},
 		{host: "123", valid: false},
@@ -110,6 +113,8 @@ func TestIsValidHost(t *testing.T) {
 		{host: "::1.", valid: false},
 		{host: "[::1]", valid: false},
 		{host: "fe80::1%a/b", valid: false},
+		{host: "fe80::1%", valid: false},
+		{host: "fe80::1%eth0%", valid: false},
 		{host: "fe80::1%25eth0", valid: true},
 		{host: "host_name", valid: false},
 		{host: "bücher.example", valid: false},
@@ -407,8 +412,8 @@ func TestValidate(t *testing.T) {
 		t.Errorf("Validate allocated %v times per run, want 0", allocs)
 	}
 	badLiteral := &proxykit.Proxy{Scheme: proxykit.HTTP, Host: "[proxy.example.com]:80"}
-	if allocs := testing.AllocsPerRun(1_000, func() { _ = badLiteral.Validate() }); allocs != 1 {
-		t.Errorf("Validate on a malformed bracketed literal allocated %v times per run, want the documented 1", allocs)
+	if allocs := testing.AllocsPerRun(1_000, func() { _ = badLiteral.Validate() }); allocs != 0 {
+		t.Errorf("Validate on a bracketed hostname allocated %v times per run, want 0", allocs)
 	}
 }
 
@@ -473,6 +478,20 @@ func TestFromURL(t *testing.T) {
 
 	if _, err := proxykit.FromURL(nil); !errors.Is(err, proxykit.ErrNilURL) {
 		t.Errorf("FromURL(nil) error = %v, want ErrNilURL", err)
+	}
+}
+
+func TestFromURLInvalidPort(t *testing.T) {
+	for _, host := range []string{
+		"proxy.example.com:bad",
+		"proxy.example.com:+80",
+		"[::1]:bad",
+		"[::1]:+80",
+	} {
+		got, err := proxykit.FromURL(&url.URL{Scheme: "http", Host: host})
+		if !errors.Is(err, proxykit.ErrInvalidPort) || !got.IsZero() {
+			t.Errorf("FromURL(%q) = (%+v, %v), want zero Proxy and ErrInvalidPort", host, got, err)
+		}
 	}
 }
 
@@ -545,6 +564,8 @@ func TestValidatorsDoNotAllocate(t *testing.T) {
 		"127.0.0.1:1",
 		"[2001:db8::1]:443",
 		"[fe80::1%eth0]:80",
+		"[fe80::1%eth0.]:80",
+		"[fe80::1%" + strings.Repeat("z", 256) + "]:80",
 	}
 	for _, input := range inputs {
 		if !proxykit.IsValidHostnamePort(input) {
@@ -562,12 +583,34 @@ func TestValidatorsDoNotAllocate(t *testing.T) {
 	}
 }
 
+func TestValidatorsDoNotInternZones(t *testing.T) {
+	const runs = 100
+	inputs := make([]struct{ host, address string }, runs+1)
+	for i := range inputs {
+		host := "fe80::1%fresh-zone-" + strconv.Itoa(i)
+		inputs[i].host = host
+		inputs[i].address = "[" + host + "]:80"
+	}
+	var next int
+	if allocs := testing.AllocsPerRun(runs, func() {
+		input := inputs[next]
+		next++
+		if !proxykit.IsValidHost(input.host) || !proxykit.IsValidHostnamePort(input.address) {
+			t.Fatal("fresh IPv6 zone rejected")
+		}
+	}); allocs != 0 {
+		t.Errorf("IPv6 zone validation allocated %v times per run, want 0", allocs)
+	}
+}
+
 func FuzzIsValidHostnamePort(f *testing.F) {
 	for _, seed := range []string{
 		"proxy.example.com:8080",
 		"127.0.0.1:1",
 		"[2001:db8::1]:443",
 		"[fe80::1%eth0]:80",
+		"[fe80::1%eth0.]:80",
+		"[fe80::1%" + strings.Repeat("z", 256) + "]:80",
 		"256.256.256.256:80",
 		":80",
 		"[::1]",
@@ -588,6 +631,9 @@ func FuzzIsValidHostnamePort(f *testing.F) {
 		host, port, _, ok := proxykit.SplitHostnamePort(s)
 		if !ok || host == "" || port == "" {
 			t.Fatalf("SplitHostnamePort(%q) = (%q, %q, _, %v) for a valid input", s, host, port, ok)
+		}
+		if !proxykit.IsValidHost(host) {
+			t.Fatalf("IsValidHost(%q) = false for valid endpoint %q", host, s)
 		}
 	})
 }

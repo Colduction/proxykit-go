@@ -8,14 +8,11 @@ func init() {
 }
 
 func detectBackend() Backend {
-	// The tests mirror internal/cpu: a vector extension counts only when the
-	// operating system saves its register state, which XCR0 reports. netbsd
-	// is excluded by build constraint because its kernel has corrupted AVX
-	// state across signals, and darwin leaves the AVX-512 XCR0 bits clear
-	// until first use, so it selects AVX2.
 	const (
+		popcnt  = 1 << 23
 		osxsave = 1 << 27
 		avx     = 1 << 28
+		bmi1    = 1 << 3
 		avx2    = 1 << 5
 		bmi2    = 1 << 8
 
@@ -23,24 +20,28 @@ func detectBackend() Backend {
 		avx512bw    = 1 << 30
 		avx512vbmi2 = 1 << 6
 
+		lzcnt = 1 << 5
+
 		ymmState = 0x06
 		zmmState = 0xe6
 	)
 	if maxLeaf, _, _, _ := cpuid(0, 0); maxLeaf < 7 {
 		return Portable
 	}
-	if _, _, ecx, _ := cpuid(1, 0); ecx&(osxsave|avx) != osxsave|avx {
+	if _, _, ecx, _ := cpuid(1, 0); ecx&(popcnt|osxsave|avx) != popcnt|osxsave|avx {
+		return Portable
+	}
+	if maxExtended, _, _, _ := cpuid(0x80000000, 0); maxExtended < 0x80000001 {
+		return Portable
+	}
+	if _, _, ecx, _ := cpuid(0x80000001, 0); ecx&lzcnt == 0 {
 		return Portable
 	}
 	xcr0, _ := xgetbv()
 	_, ebx, ecx, _ := cpuid(7, 0)
-	if xcr0&ymmState != ymmState || ebx&avx2 == 0 {
+	if xcr0&ymmState != ymmState || ebx&(avx2|bmi1) != avx2|bmi1 {
 		return Portable
 	}
-	// The kernel builds its length mask with BZHI, a BMI2 instruction.
-	// VBMI2 is not used by the kernel. Requiring it confines 512-bit vectors
-	// to processors that run them without lowering the core frequency, the
-	// gate simdjson applies to its AVX-512 kernel.
 	if xcr0&zmmState == zmmState && ebx&(bmi2|avx512f|avx512bw) == bmi2|avx512f|avx512bw && ecx&avx512vbmi2 != 0 {
 		return AVX512
 	}
