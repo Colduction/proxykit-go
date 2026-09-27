@@ -143,7 +143,8 @@ type Parse struct {
 // A bracketed IPv6 host is captured through its closing bracket before
 // searching for the next delimiter.
 //
-// In strict mode, input must match format exactly.
+// In strict mode, input must match format exactly, and each host and port
+// capture must be nonempty.
 // In lenient mode, credentials may be absent, and a %u:%p@ group also accepts
 // username@ with an empty password. Delimiter mismatches and trailing input
 // are ignored, and the final proxy must still pass [proxykit.Proxy.IsValid].
@@ -155,7 +156,11 @@ func New(format string, strict bool) (*Parse, error) {
 	if kind != parserGeneric {
 		return &Parse{strict: true, hasScheme: true, kind: kind}, nil
 	}
-	plan := make([]parseOp, 0, countFormatOps(format))
+	count, err := countFormatOps(format)
+	if err != nil {
+		return nil, err
+	}
+	plan := make([]parseOp, 0, count)
 	var hasScheme bool
 	for i := 0; i < len(format); {
 		if format[i] != '%' {
@@ -179,12 +184,15 @@ func New(format string, strict bool) (*Parse, error) {
 			}
 			continue
 		}
-		if i+1 >= len(format) {
-			return nil, ErrInvalidFormatEndStr
-		}
 		verb := format[i+1]
-		switch verb {
-		case 't', 'h', 'd', 'u', 'p':
+		if verb == '%' {
+			plan = append(plan, parseOp{
+				delimiterStart:  uint32(i),
+				delimiterLength: 1,
+				delimiterByte:   '%',
+				delimiterClass:  noClass,
+			})
+		} else {
 			plan = append(plan, parseOp{
 				credentialEnd: noPlanIndex,
 				field:         verb,
@@ -192,15 +200,6 @@ func New(format string, strict bool) (*Parse, error) {
 			if verb == 't' {
 				hasScheme = true
 			}
-		case '%':
-			plan = append(plan, parseOp{
-				delimiterStart:  uint32(i),
-				delimiterLength: 1,
-				delimiterByte:   '%',
-				delimiterClass:  noClass,
-			})
-		default:
-			return nil, ErrInvalidFormatVerb(verb)
 		}
 		i += 2
 	}
@@ -310,6 +309,8 @@ func (pp *Parse) parseInto(input string, proxy *proxykit.Proxy, fast bool) error
 		hostEnd      int
 		hostParsed   bool
 		schemeParsed bool
+		emptyHost    bool
+		emptyPort    bool
 	)
 	if !pp.strict && !pp.hasScheme {
 		idx := indexSchemeSeparator(&ix, indexed, input, 0)
@@ -436,11 +437,17 @@ func (pp *Parse) parseInto(input string, proxy *proxykit.Proxy, fast bool) error
 		capturedValue := input[start:inputPos]
 		switch op.field {
 		case 'h':
+			if capturedValue == "" {
+				emptyHost = true
+			}
 			proxy.Host = capturedValue
 			hostStart = start
 			hostEnd = inputPos
 			hostParsed = capturedValue != ""
 		case 'd':
+			if capturedValue == "" {
+				emptyPort = true
+			}
 			if hostStart >= 0 && hostEnd+1 == start && input[hostEnd] == ':' {
 				proxy.Host = input[hostStart:inputPos]
 			} else if proxy.Host == "" {
@@ -462,6 +469,18 @@ func (pp *Parse) parseInto(input string, proxy *proxykit.Proxy, fast bool) error
 	if pp.strict {
 		if inputPos < len(input) {
 			return ErrUnexpectedTrail(input[inputPos:])
+		}
+		if emptyHost || emptyPort {
+			if !proxy.Scheme.IsValid() {
+				return errInvalidScheme
+			}
+			if proxy.Host == "" {
+				return errInvalidHost
+			}
+			if emptyPort {
+				return errInvalidPort
+			}
+			return errInvalidHost
 		}
 	} else {
 		if !schemeParsed && proxy.Scheme == "" {
@@ -486,16 +505,15 @@ func parseStrictSchemeHostPort(input string) (proxykit.ProxyScheme, string, erro
 		return "", "", ErrSubseqDelimNotFound("://")
 	}
 	scheme := proxykit.ProxyScheme(before)
-	schemeOK := scheme.IsValid()
-	if !schemeOK {
-		scheme, schemeOK = schemeOf(before)
+	if !scheme.IsValid() {
+		scheme, _ = schemeOf(before)
 	}
-	endpointValid := schemeOK && proxykit.IsValidHostnamePort(after)
-	if !endpointValid && strings.LastIndexByte(after, ':') < 0 {
-		return "", "", ErrSubseqDelimNotFound(":")
-	}
-	if !endpointValid {
-		return scheme, after, invalidProxyFormat((&proxykit.Proxy{Scheme: scheme, Host: after}).Validate())
+	parsed := proxykit.Proxy{Scheme: scheme, Host: after}
+	if err := parsed.Validate(); err != nil {
+		if strings.LastIndexByte(after, ':') < 0 {
+			return "", "", ErrSubseqDelimNotFound(":")
+		}
+		return scheme, after, invalidProxyFormat(err)
 	}
 	return scheme, after, nil
 }
@@ -519,18 +537,16 @@ func parseStrictFullCredentials(input string) (proxykit.ProxyScheme, string, str
 	passwordEnd += passwordStart
 	host := input[passwordEnd+1:]
 	scheme := proxykit.ProxyScheme(input[:schemeEnd])
-	schemeOK := scheme.IsValid()
-	if !schemeOK {
-		scheme, schemeOK = schemeOf(input[:schemeEnd])
-	}
-	endpointValid := schemeOK && proxykit.IsValidHostnamePort(host)
-	if !endpointValid && strings.LastIndexByte(host, ':') < 0 {
-		return "", "", "", "", ErrSubseqDelimNotFound(":")
+	if !scheme.IsValid() {
+		scheme, _ = schemeOf(input[:schemeEnd])
 	}
 	username, password := input[usernameStart:usernameEnd], input[passwordStart:passwordEnd]
-	if !endpointValid || !proxykit.IsValidCredentialsFor(scheme, username, password) {
-		parsed := proxykit.Proxy{Scheme: scheme, Host: host, Username: username, Password: password}
-		return scheme, host, username, password, invalidProxyFormat(parsed.Validate())
+	parsed := proxykit.Proxy{Scheme: scheme, Host: host, Username: username, Password: password}
+	if err := parsed.Validate(); err != nil {
+		if strings.LastIndexByte(host, ':') < 0 {
+			return "", "", "", "", ErrSubseqDelimNotFound(":")
+		}
+		return scheme, host, username, password, invalidProxyFormat(err)
 	}
 	return scheme, host, username, password, nil
 }
@@ -593,19 +609,27 @@ func invalidProxyFormat(err error) error {
 	}
 }
 
-func countFormatOps(format string) int {
+func countFormatOps(format string) (int, error) {
 	var count int
 	for i := 0; i < len(format); i++ {
 		count++
 		if format[i] == '%' {
 			i++
+			if i == len(format) {
+				return 0, ErrInvalidFormatEndStr
+			}
+			switch verb := format[i]; verb {
+			case 't', 'h', 'd', 'u', 'p', '%':
+			default:
+				return 0, ErrInvalidFormatVerb(verb)
+			}
 			continue
 		}
 		for i+1 < len(format) && format[i+1] != '%' {
 			i++
 		}
 	}
-	return count
+	return count, nil
 }
 
 func detectParserKind(format string, strict bool) parserKind {

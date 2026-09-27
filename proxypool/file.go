@@ -11,7 +11,11 @@ import (
 // POSIX_FADV_SEQUENTIAL, macOS F_RDAHEAD, and Windows
 // FILE_FLAG_SEQUENTIAL_SCAN. On Windows the handle is opened for overlapped
 // I/O in both modes.
+// An unsupported mode returns an error without opening or changing the file.
 func OpenFile(name string, flag int, perm os.FileMode, mode Mode) (*os.File, error) {
+	if err := mode.Valid(); err != nil {
+		return nil, err
+	}
 	return fileopen.Open(name, flag, perm, mode == ModeSequential)
 }
 

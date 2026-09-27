@@ -766,11 +766,15 @@ func (pool *Pool) resizeBuffer(length int) {
 	pool.buffer = pool.resized(pool.buffer, length)
 }
 
+func (pool *Pool) bufferLimit() int {
+	return int(min(int64(pool.blockBytes+pool.maxLineBytes), pool.fileSize)) + 3
+}
+
 func (pool *Pool) resized(buffer []byte, length int) []byte {
 	if cap(buffer) >= length {
 		return buffer[:length]
 	}
-	maximum := pool.blockBytes + pool.maxLineBytes + 3
+	maximum := pool.bufferLimit()
 	capacity := length + 2
 	if cap(buffer) == 0 && pool.fileSize > int64(pool.blockBytes) {
 		capacity = max(capacity, min(maximum, pool.blockBytes+2+pool.lookaheadBytes()))
@@ -955,6 +959,8 @@ func (pool *Pool) Close() error {
 	}
 	err := pool.file.Close()
 	pool.file = nil
+	pool.reader = blockread.Reader{}
+	pool.terminal = nil
 	pool.buffer = nil
 	pool.offsets = nil
 	pool.hints = blockread.Hints{}

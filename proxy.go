@@ -405,7 +405,10 @@ func (p *Proxy) ExportURL() *url.URL {
 // forms are redacted; slog reports a nil *Proxy as a LogValue panic rather
 // than dereferencing it.
 func (p Proxy) LogValue() slog.Value {
-	return slog.StringValue(p.ExportURL().Redacted())
+	if p.Password != "" {
+		p.Password = "xxxxx"
+	}
+	return slog.StringValue(p.ExportURL().String())
 }
 
 // IsValidScheme reports whether p's scheme passes [ProxyScheme.IsValid].

@@ -14,9 +14,8 @@ import (
 // that [Batch.Next] returns alias that storage and stay valid until the Batch
 // is passed to [Pool.NextBatch] again, even after the pool is reset or closed.
 // A returned line has no spare capacity, so appending to it copies it.
-// Pass a Batch back to the pool that filled it, or to one with the same block
-// and line limits, so that its storage is reused; the storage of a larger
-// Batch is dropped instead.
+// Passing a Batch back lets the pool reuse storage that fits its block,
+// line, and source-size limits; larger storage is dropped.
 type Batch struct {
 	noCopy    noCopy
 	remaining int
@@ -196,10 +195,10 @@ func (pool *Pool) nextBatchLocked(batch *Batch) error {
 	if pool.terminal != nil {
 		return pool.terminal
 	}
-	if cap(batch.buffer) > pool.blockBytes+pool.maxLineBytes+3 {
+	if cap(batch.buffer) > pool.bufferLimit() {
 		batch.buffer = nil
 	}
-	if cap(batch.offsets) > pool.blockBytes+1 {
+	if cap(batch.offsets) > int(min(int64(pool.blockBytes), pool.fileSize))+1 {
 		batch.offsets = nil
 	}
 	lines := int64(len(pool.offsets)) - 1

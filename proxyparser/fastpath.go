@@ -222,7 +222,8 @@ func isHostPort(ix *structuralindex.Index, indexed bool, input string, start int
 	// because the branch predictor then supplies the host length early.
 	n := len(input)
 	portStart := n
-	for portStart > start && input[portStart-1]-'0' <= 9 {
+	portLimit := max(start, n-maxPortDigits-1)
+	for portStart > portLimit && input[portStart-1]-'0' <= 9 {
 		portStart--
 	}
 	digits, hostEnd := uint(n-portStart), portStart-1

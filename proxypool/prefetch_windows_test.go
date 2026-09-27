@@ -4,11 +4,41 @@ import (
 	"errors"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/colduction/proxykit-go/internal/blockread"
 	"github.com/colduction/proxykit-go/proxypool"
 )
+
+// TestPrefetchDirectLargeLineLimit checks aligned reads when the line limit exceeds the source size.
+func TestPrefetchDirectLargeLineLimit(t *testing.T) {
+	defer blockread.SetForceDirect(blockread.SetForceDirect(true))
+	content := strings.Repeat("x", 64<<10) + "\r\n" + strings.Repeat("y", 192<<10) + "\r"
+	path := writeFile(t, content)
+	for _, mode := range []proxypool.Mode{proxypool.ModeSequential, proxypool.ModeShuffled} {
+		pool, err := proxypool.Open(path, proxypool.Options{
+			Mode:                  mode,
+			SequentialBufferBytes: 64 << 10,
+			BlockBytes:            64 << 10,
+			RegionBytes:           128 << 10,
+			MaxLineBytes:          1 << 30,
+			Seed:                  1,
+			Prefetch:              true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer pool.Close()
+		if !proxypool.Direct(pool) {
+			t.Fatal("pool does not read without buffering")
+		}
+		got, err := collectBatches(pool, 0)
+		if err != nil || !slices.Equal(sortedCopy(got), sortedCopy(contentLines(content))) {
+			t.Fatalf("mode %d: got %d lines, %v; want two complete lines", mode, len(got), err)
+		}
+	}
+}
 
 // Reads without buffering cover whole pages from each block's first byte,
 // and the byte before a block that does not follow the last one loaded comes

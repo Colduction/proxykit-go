@@ -20,6 +20,14 @@ Regression tests cover these behaviors:
 - Unix pools reject FIFOs without waiting for a writer. The opened descriptor
   is still checked for regular-file type.
 - Plan 9 builds use `errors.ErrUnsupported` for unavailable advisory calls.
+- Strict custom formats reject empty host and port captures even when another
+  field could supply a valid combined endpoint.
+- Invalid format verbs are rejected before allocating the parser plan. Long
+  port suffixes leave the fast path after six digits, and scalar endpoint
+  validation runs once.
+- `OpenFile` rejects invalid modes before creating or truncating a source.
+- Linux read-ahead hints reject invalid ranges and do not wrap the final chunk
+  offset near `MaxInt64`.
 
 The pool remembers one bounded interval of blocks that a successfully completed
 line proves contain no line starts. It skips their reads without changing region

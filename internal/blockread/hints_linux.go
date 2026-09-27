@@ -3,6 +3,7 @@
 package blockread
 
 import (
+	"math"
 	"math/bits"
 	"os"
 	"syscall"
@@ -15,10 +16,10 @@ import (
 // Open prepares it for a file.
 type Hints struct {
 	raw    syscall.RawConn
+	err    error
 	advise func(fd uintptr)
 	offset int64
 	length int
-	err    error
 }
 
 // Open prepares hints for file, which must stay open while hints is in use,
@@ -44,8 +45,10 @@ func (hints *Hints) Open(file *os.File) bool {
 	hints.raw = raw
 	hints.advise = func(fd uintptr) {
 		end := hints.offset + int64(hints.length)
-		for offset := hints.offset; offset < end && hints.err == nil; offset += chunkBytes {
-			hints.err = fileopen.Fadvise(int(fd), offset, min(chunkBytes, end-offset), posixFadvWillNeed)
+		for offset := hints.offset; offset < end && hints.err == nil; {
+			length := min(chunkBytes, end-offset)
+			hints.err = fileopen.Fadvise(int(fd), offset, length, posixFadvWillNeed)
+			offset += length
 		}
 	}
 	return true
@@ -53,7 +56,11 @@ func (hints *Hints) Open(file *os.File) bool {
 
 // Advise asks the kernel to read length bytes at offset in the background
 // and reports whether it took the hint.
+// It rejects negative offsets or lengths and ranges whose end exceeds the largest int64.
 func (hints *Hints) Advise(offset int64, length int) bool {
+	if offset < 0 || length < 0 || int64(length) > math.MaxInt64-offset {
+		return false
+	}
 	hints.offset, hints.length, hints.err = offset, length, nil
 	if err := hints.raw.Control(hints.advise); err != nil {
 		return false

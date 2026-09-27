@@ -557,6 +557,27 @@ func TestLogValue(t *testing.T) {
 	}
 }
 
+// TestLogValueMatchesRedactedURL checks redaction without changing proxy fields.
+func TestLogValueMatchesRedactedURL(t *testing.T) {
+	for _, proxy := range []proxykit.Proxy{
+		{},
+		{Scheme: proxykit.HTTP, Host: "proxy.example:80"},
+		{Scheme: proxykit.HTTP, Host: "proxy.example:80", Username: "user"},
+		{Scheme: proxykit.HTTP, Host: "proxy.example:80", Password: "secret"},
+		{Scheme: proxykit.HTTP, Host: "proxy.example:80", Username: "user", Password: "secret"},
+		{Scheme: proxykit.HTTPS, Host: "[fe80::1%eth0]:443", Username: "user@example", Password: "p@ss:/word"},
+	} {
+		before := proxy
+		got := proxy.LogValue()
+		if want := proxy.ExportURL().Redacted(); got.Kind() != slog.KindString || got.String() != want {
+			t.Errorf("LogValue() = %v, want %q", got, want)
+		}
+		if proxy != before {
+			t.Error("LogValue changed the proxy")
+		}
+	}
+}
+
 func TestValidatorsDoNotAllocate(t *testing.T) {
 	inputs := []string{
 		"proxy.example.com:8080",
@@ -758,5 +779,25 @@ func BenchmarkExportURL(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		_ = proxy.ExportURL()
+	}
+}
+
+// BenchmarkLogValue measures allocations for endpoint and credential logging.
+func BenchmarkLogValue(b *testing.B) {
+	for _, test := range []struct {
+		name  string
+		proxy proxykit.Proxy
+	}{
+		{name: "Endpoint", proxy: proxykit.Proxy{Scheme: proxykit.HTTP, Host: "proxy.example.com:8080"}},
+		{name: "Username", proxy: proxykit.Proxy{Scheme: proxykit.HTTP, Host: "proxy.example.com:8080", Username: "user"}},
+		{name: "Password", proxy: proxykit.Proxy{Scheme: proxykit.HTTP, Host: "proxy.example.com:8080", Username: "user", Password: "secret"}},
+		{name: "Escaped", proxy: proxykit.Proxy{Scheme: proxykit.HTTPS, Host: "[fe80::1%eth0]:443", Username: "user@example", Password: "secret"}},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = test.proxy.LogValue()
+			}
+		})
 	}
 }

@@ -5,7 +5,7 @@
 **Fast, allocation-aware Go tools for HTTP and SOCKS proxies.**
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/colduction/proxykit-go.svg)](https://pkg.go.dev/github.com/colduction/proxykit-go)
-[![Go 1.27+](https://img.shields.io/badge/go-1.27%2B-00ADD8?logo=go&logoColor=white)](go.mod)
+[![Go version](https://img.shields.io/github/go-mod/go-version/colduction/keycheck-go)](go.mod)
 [![Dependencies: none](https://img.shields.io/badge/dependencies-none-brightgreen)](go.mod)
 [![License](https://img.shields.io/github/license/colduction/proxykit-go)](LICENSE)
 
