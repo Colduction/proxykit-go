@@ -7,17 +7,16 @@ import (
 	"unsafe"
 )
 
-// An Ahead keeps reads of a file in flight on a second, overlapped handle,
-// each in a slot with storage the Ahead holds while the read runs, so that
-// the storage stays reachable even when its caller is dropped. The cache
-// manager serves a buffered read on its own threads; one read in flight
-// measured slower than a synchronous handle on an uncached file, and two or
-// more reached the throughput of the device.
+// An Ahead keeps reads of a file in flight on a separate, overlapped handle.
+// [Reader.OpenAhead] creates it; the zero value owns no resources.
+// Each slot retains its storage until [Ahead.Swap] or [Ahead.Close] releases it.
+// Reads in flight must complete through [Ahead.Wait], [Ahead.Settle], or
+// [Ahead.Close] before their storage is accessed or replaced.
+// Slot arguments must be between zero and [AheadDepth] minus one.
 //
-// Without buffering, the device writes each block straight into the storage,
-// which spares a copy per byte and the cache the pages of a scan that could
-// never stay in it. Such a read must start and end on sector boundaries in
-// memory and in the file.
+// Reads that bypass the system cache require sector-aligned buffer addresses,
+// file offsets, and lengths. Aligning each to [PageBytes] satisfies these
+// requirements for supported files.
 type Ahead struct {
 	requests [AheadDepth]request
 	handle   syscall.Handle
@@ -25,9 +24,9 @@ type Ahead struct {
 }
 
 type request struct {
-	overlapped syscall.Overlapped
 	storage    []byte
 	target     []byte
+	overlapped syscall.Overlapped
 	block      int64
 	offset     int64
 	event      syscall.Handle
@@ -35,12 +34,12 @@ type request struct {
 	pending    bool
 }
 
-// Direct reports whether the reads of ahead bypass the system cache.
+// Direct reports whether reads bypass the system cache.
 func (ahead *Ahead) Direct() bool {
 	return ahead.direct
 }
 
-// Find returns the slot of the read of block in flight, or -1.
+// Find returns the slot with a read in flight for the requested block, or -1.
 func (ahead *Ahead) Find(block int64) int {
 	for slot := range ahead.requests {
 		if request := &ahead.requests[slot]; request.pending && request.block == block {
@@ -60,34 +59,28 @@ func (ahead *Ahead) Idle() int {
 	return -1
 }
 
-// Block returns the block of the read in slot and whether it is in flight.
+// Block returns the slot's block number and reports whether its read is in flight.
 func (ahead *Ahead) Block(slot int) (int64, bool) {
 	request := &ahead.requests[slot]
 	return request.block, request.pending
 }
 
-// Swap exchanges the storage slot holds for storage and returns it. The
-// slot must have no read in flight.
+// Swap replaces the slot's storage and returns its previous storage.
+// The slot must have no read in flight.
 func (ahead *Ahead) Swap(slot int, storage []byte) []byte {
 	request := &ahead.requests[slot]
 	storage, request.storage = request.storage, storage
 	return storage
 }
 
-// Start makes storage the storage of slot and reads target, which lies in
-// storage, at offset for block. The slot must have no read in flight. A read
-// that fails at once, such as one at or past the end of a file that shrank,
-// leaves the slot without a read in flight; only other errors are returned.
+// Start submits a read into the target buffer at the requested byte offset
+// and associates it with the slot and block number.
+// The target must lie within the supplied storage, which the slot retains.
+// The slot must have no read in flight, and the caller must not access the
+// target until [Ahead.Wait], [Ahead.Settle], or [Ahead.Close] completes it.
+// An immediate end-of-file failure leaves the slot idle and returns nil;
+// other immediate failures return an error.
 func (ahead *Ahead) Start(slot int, block int64, storage, target []byte, offset int64) error {
-	// The kernel writes target and the OVERLAPPED structure after ReadFile
-	// returns; both are heap objects, which the collector does not move, and
-	// the request keeps them reachable until Wait, as the Ahead keeps the
-	// request. A runtime.Pinner would allocate as it passes between
-	// processors. ReadFile stores a count only when it completes at once,
-	// which Wait reads again; the race detector's wrapper needs a place for
-	// it. Only a read that completed or is in flight signals the event; one
-	// that failed at once leaves the OVERLAPPED structure pending, where a
-	// wait would never return.
 	request := &ahead.requests[slot]
 	request.storage = storage
 	request.overlapped = syscall.Overlapped{Offset: uint32(offset), OffsetHigh: uint32(offset >> 32), HEvent: request.event}
@@ -102,9 +95,9 @@ func (ahead *Ahead) Start(slot int, block int64, storage, target []byte, offset 
 	return nil
 }
 
-// Wait waits for the read in slot and reports its offset and length, the
-// count it read, and its error, which is [io.EOF] for a count short of the
-// length.
+// Wait waits for the slot's read and returns its byte offset, requested length,
+// byte count, and error. A short read returns [io.EOF].
+// The slot must have a read in flight; completion makes the slot idle.
 func (ahead *Ahead) Wait(slot int) (offset int64, length, read int, err error) {
 	request := &ahead.requests[slot]
 	r1, _, errno := syscall.SyscallN(procGetOverlappedResult.Addr(),
@@ -118,7 +111,7 @@ func (ahead *Ahead) Wait(slot int) (offset int64, length, read int, err error) {
 	return request.offset, length, read, err
 }
 
-// Settle cancels the read in slot, if one is in flight, and waits until the
+// Settle cancels the slot's read, if one is in flight, and waits until the
 // kernel lets go of its storage.
 func (ahead *Ahead) Settle(slot int) {
 	request := &ahead.requests[slot]
@@ -129,8 +122,8 @@ func (ahead *Ahead) Settle(slot int) {
 	_, _, _, _ = ahead.Wait(slot)
 }
 
-// RetainedBytes returns the memory the storage of ahead retains, which is 0
-// for a nil Ahead.
+// RetainedBytes returns the bytes retained by the slots' storage.
+// It returns zero for a nil receiver.
 func (ahead *Ahead) RetainedBytes() int64 {
 	if ahead == nil {
 		return 0
@@ -142,10 +135,9 @@ func (ahead *Ahead) RetainedBytes() int64 {
 	return total
 }
 
-// Close settles the reads of ahead and closes its handle and events. It
-// suits a cleanup of the owner of ahead, which may run after the file's
-// own cleanup closed the first handle; a wait then ends when the canceled
-// read completes.
+// Close settles all reads, releases retained storage, and closes the handle
+// and completion events. It may run after the source file is closed.
+// Repeated calls are safe.
 func (ahead *Ahead) Close() {
 	for slot := range ahead.requests {
 		ahead.Settle(slot)

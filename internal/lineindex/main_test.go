@@ -1,3 +1,4 @@
+// Package lineindex_test checks line indexing against byte-wise reference results.
 package lineindex_test
 
 import (
@@ -31,9 +32,6 @@ func TestMain(m *testing.M) {
 }
 
 func unsafeUint32s(b []byte) []uint32 {
-	// It views b, whose length is a multiple of 4 and whose address is
-	// 4-byte aligned, as uint32 elements, so that a test can place dst against a
-	// protected page.
 	if len(b) == 0 {
 		return nil
 	}

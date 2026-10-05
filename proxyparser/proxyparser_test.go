@@ -20,6 +20,7 @@ func mustNew(t testing.TB, format string, strict bool) *proxyparser.Parse {
 	return p
 }
 
+// TestNew_InvalidFormatVerb checks rejection of unsupported format verbs.
 func TestNew_InvalidFormatVerb(t *testing.T) {
 	_, err := proxyparser.New("%t://%x", false)
 	if err == nil {
@@ -30,6 +31,7 @@ func TestNew_InvalidFormatVerb(t *testing.T) {
 	}
 }
 
+// TestNew_FormatEndingWithPercent checks rejection of an incomplete format verb.
 func TestNew_FormatEndingWithPercent(t *testing.T) {
 	_, err := proxyparser.New("%t://%h:%", false)
 	if err == nil {
@@ -40,6 +42,7 @@ func TestNew_FormatEndingWithPercent(t *testing.T) {
 	}
 }
 
+// TestNew_EscapedPercent checks compilation of a literal percent sign.
 func TestNew_EscapedPercent(t *testing.T) {
 	p, err := proxyparser.New("%%%t://%h:%d", true)
 	if err != nil {
@@ -50,6 +53,7 @@ func TestNew_EscapedPercent(t *testing.T) {
 	}
 }
 
+// TestNew_ValidFormats checks compilation of supported proxy formats.
 func TestNew_ValidFormats(t *testing.T) {
 	formats := []string{
 		"%t://%h",
@@ -66,6 +70,7 @@ func TestNew_ValidFormats(t *testing.T) {
 	}
 }
 
+// TestParse_SchemeAndHostPort_Strict checks strict scheme and endpoint parsing.
 func TestParse_SchemeAndHostPort_Strict(t *testing.T) {
 	p := mustNew(t, "%t://%h:%d", true)
 	proxy, err := p.Parse("http://proxy.example.com:8080")
@@ -80,6 +85,7 @@ func TestParse_SchemeAndHostPort_Strict(t *testing.T) {
 	}
 }
 
+// TestParse_FullFormat_Strict checks strict parsing of schemes, endpoints, and credentials.
 func TestParse_FullFormat_Strict(t *testing.T) {
 	p := mustNew(t, "%t://%u:%p@%h:%d", true)
 	proxy, err := p.Parse("socks5://alice:s3cr3t@proxy.example.com:1080")
@@ -100,6 +106,7 @@ func TestParse_FullFormat_Strict(t *testing.T) {
 	}
 }
 
+// TestParse_CustomDelimiters_Lenient checks lenient parsing with custom delimiters.
 func TestParse_CustomDelimiters_Lenient(t *testing.T) {
 	p := mustNew(t, "(%t)%h:%d:%u:%p", false)
 	proxy, err := p.Parse("(http)res-us.lightningproxies.net:9999:admin:pass")
@@ -120,6 +127,7 @@ func TestParse_CustomDelimiters_Lenient(t *testing.T) {
 	}
 }
 
+// TestParse_Lenient_NoSchemeInFormat_AutoDetect checks scheme detection when the format omits the scheme.
 func TestParse_Lenient_NoSchemeInFormat_AutoDetect(t *testing.T) {
 	p := mustNew(t, "%h:%d", false)
 	proxy, err := p.Parse("http://proxy.example.com:3128")
@@ -134,6 +142,7 @@ func TestParse_Lenient_NoSchemeInFormat_AutoDetect(t *testing.T) {
 	}
 }
 
+// TestParse_Lenient_MissingCredentials checks lenient parsing without credentials.
 func TestParse_Lenient_MissingCredentials(t *testing.T) {
 	p := mustNew(t, "%t://%u:%p@%h:%d", false)
 	proxy, err := p.Parse("http://proxy.example.com:8080")
@@ -151,6 +160,7 @@ func TestParse_Lenient_MissingCredentials(t *testing.T) {
 	}
 }
 
+// TestParse_Lenient_OnlyUserNoPassword checks lenient parsing of a username without a password.
 func TestParse_Lenient_OnlyUserNoPassword(t *testing.T) {
 	p := mustNew(t, "%t://%u@%h:%d", false)
 	proxy, err := p.Parse("http://bob@proxy.example.com:3128")
@@ -165,6 +175,7 @@ func TestParse_Lenient_OnlyUserNoPassword(t *testing.T) {
 	}
 }
 
+// TestParse_HTTPS checks parsing of HTTPS proxy endpoints.
 func TestParse_HTTPS(t *testing.T) {
 	p := mustNew(t, "%t://%h:%d", true)
 	proxy, err := p.Parse("https://secure.proxy.com:443")
@@ -176,6 +187,7 @@ func TestParse_HTTPS(t *testing.T) {
 	}
 }
 
+// TestParse_SOCKS5H checks parsing of SOCKS5 proxies with remote host resolution.
 func TestParse_SOCKS5H(t *testing.T) {
 	p := mustNew(t, "%t://%h:%d", true)
 	proxy, err := p.Parse("socks5h://proxy.example.com:1080")
@@ -187,6 +199,7 @@ func TestParse_SOCKS5H(t *testing.T) {
 	}
 }
 
+// TestParse_EscapedPercent checks parsing of literal percent signs.
 func TestParse_EscapedPercent(t *testing.T) {
 	p := mustNew(t, "%%%t://%h:%d", true)
 	proxy, err := p.Parse("%http://proxy.example.com:8080")
@@ -198,6 +211,7 @@ func TestParse_EscapedPercent(t *testing.T) {
 	}
 }
 
+// TestParse_MissingScheme_Lenient checks lenient rejection of a missing scheme.
 func TestParse_MissingScheme_Lenient(t *testing.T) {
 	p := mustNew(t, "%h:%d", false)
 	_, err := p.Parse("proxy.example.com:8080")
@@ -209,6 +223,7 @@ func TestParse_MissingScheme_Lenient(t *testing.T) {
 	}
 }
 
+// TestParse_InvalidProxyFormat checks rejection of invalid parsed proxy fields.
 func TestParse_InvalidProxyFormat(t *testing.T) {
 	p := mustNew(t, "%t://%h:%d", true)
 	_, err := p.Parse("badscheme://proxy.example.com:8080")
@@ -220,6 +235,7 @@ func TestParse_InvalidProxyFormat(t *testing.T) {
 	}
 }
 
+// TestParse_StrictMode_TrailingChars checks rejection of trailing input in strict parsing.
 func TestParse_StrictMode_TrailingChars(t *testing.T) {
 	p := mustNew(t, "%t://%h:%d!", true)
 	_, err := p.Parse("http://proxy.example.com:8080!extra")
@@ -231,6 +247,7 @@ func TestParse_StrictMode_TrailingChars(t *testing.T) {
 	}
 }
 
+// TestParse_StrictMode_MismatchDelimiter checks rejection of mismatched delimiters in strict parsing.
 func TestParse_StrictMode_MismatchDelimiter(t *testing.T) {
 	p := mustNew(t, "(%t)%h:%d", true)
 	_, err := p.Parse("http)proxy.example.com:8080")
@@ -242,6 +259,7 @@ func TestParse_StrictMode_MismatchDelimiter(t *testing.T) {
 	}
 }
 
+// TestParse_NilPlan checks parsing with a nil receiver.
 func TestParse_NilPlan(t *testing.T) {
 	p, err := proxyparser.New("", false)
 	if err != nil {
@@ -256,6 +274,7 @@ func TestParse_NilPlan(t *testing.T) {
 	}
 }
 
+// TestParse_SubseqDelimNotFound_Strict checks rejection of missing delimiters in strict parsing.
 func TestParse_SubseqDelimNotFound_Strict(t *testing.T) {
 	p := mustNew(t, "%t://%u:%p@%h:%d", true)
 	_, err := p.Parse("http://user:passNOAT-proxy.example.com:8080")
@@ -264,6 +283,7 @@ func TestParse_SubseqDelimNotFound_Strict(t *testing.T) {
 	}
 }
 
+// TestParse_LenientDelimiterMismatchCompatibility checks lenient parsing with mismatched delimiters.
 func TestParse_LenientDelimiterMismatchCompatibility(t *testing.T) {
 	p := mustNew(t, "(%t)%h:%d", false)
 	proxy, err := p.ParseString("http)proxy.example.com:8080")
@@ -275,6 +295,7 @@ func TestParse_LenientDelimiterMismatchCompatibility(t *testing.T) {
 	}
 }
 
+// TestParse_LenientMissingPortCompatibility checks lenient handling of a missing port capture.
 func TestParse_LenientMissingPortCompatibility(t *testing.T) {
 	p := mustNew(t, "%t://%h:%d", false)
 	_, err := p.ParseString("http://proxy.example.com")
@@ -283,6 +304,7 @@ func TestParse_LenientMissingPortCompatibility(t *testing.T) {
 	}
 }
 
+// TestParse_StrictMissingPortDelimiter checks strict rejection of a missing port delimiter.
 func TestParse_StrictMissingPortDelimiter(t *testing.T) {
 	p := mustNew(t, "%t://%h:%d", true)
 	_, err := p.ParseString("http://proxy.example.com")
@@ -291,6 +313,7 @@ func TestParse_StrictMissingPortDelimiter(t *testing.T) {
 	}
 }
 
+// TestCanonicalErrorResults checks stable parsing errors and validation error precedence.
 func TestCanonicalErrorResults(t *testing.T) {
 	tests := []struct {
 		format, input string
@@ -334,6 +357,7 @@ func TestCanonicalErrorResults(t *testing.T) {
 	}
 }
 
+// TestGenericDelimiterOwnership checks delimiter consumption in compiled generic formats.
 func TestGenericDelimiterOwnership(t *testing.T) {
 	tests := []struct {
 		name, format, input string
@@ -364,6 +388,7 @@ func TestGenericDelimiterOwnership(t *testing.T) {
 	}
 }
 
+// TestParse_Idempotent checks consistent results from repeated parsing.
 func TestParse_Idempotent(t *testing.T) {
 	p := mustNew(t, "%t://%u:%p@%h:%d", true)
 	input := "socks5://user:pass@proxy.example.com:1080"
@@ -377,6 +402,7 @@ func TestParse_Idempotent(t *testing.T) {
 	}
 }
 
+// TestParseInto_ZeroAlloc checks allocation-free parsing into a supplied destination.
 func TestParseInto_ZeroAlloc(t *testing.T) {
 	p := mustNew(t, "%t://%u:%p@%h:%d", true)
 	input := "socks5://user:pass@proxy.example.com:1080"
@@ -394,6 +420,7 @@ func TestParseInto_ZeroAlloc(t *testing.T) {
 	}
 }
 
+// TestParseInto_NilDestination checks rejection of a nil parsing destination.
 func TestParseInto_NilDestination(t *testing.T) {
 	p := mustNew(t, "%t://%h:%d", true)
 	if err := p.ParseInto("http://proxy.example.com:8080", nil); !errors.Is(err, proxyparser.ErrNilProxy) {
@@ -401,6 +428,7 @@ func TestParseInto_NilDestination(t *testing.T) {
 	}
 }
 
+// TestParseString_ZeroAlloc checks allocation-free parsing by value.
 func TestParseString_ZeroAlloc(t *testing.T) {
 	p := mustNew(t, "%t://%u:%p@%h:%d", true)
 	input := "socks5://user:pass@proxy.example.com:1080"
@@ -418,6 +446,7 @@ func TestParseString_ZeroAlloc(t *testing.T) {
 	}
 }
 
+// TestParse_ErrorZeroAlloc checks allocation-free rejection of representative invalid inputs.
 func TestParse_ErrorZeroAlloc(t *testing.T) {
 	p := mustNew(t, "%t://%h:%d", true)
 	input := "invalid://proxy.example.com:8080"
@@ -432,6 +461,7 @@ func TestParse_ErrorZeroAlloc(t *testing.T) {
 	}
 }
 
+// TestParseBytes_ZeroAlloc checks allocation-free parsing of byte slices.
 func TestParseBytes_ZeroAlloc(t *testing.T) {
 	p := mustNew(t, "%t://%h:%d", true)
 	input := []byte("http://proxy.example.com:8080")
@@ -449,6 +479,7 @@ func TestParseBytes_ZeroAlloc(t *testing.T) {
 	}
 }
 
+// TestParse_StrictIPv6HostPort checks strict parsing of bracketed IPv6 endpoints.
 func TestParse_StrictIPv6HostPort(t *testing.T) {
 	p := mustNew(t, "%t://%h:%d", true)
 	proxy, err := p.ParseString("http://[2001:db8::1]:8080")
@@ -460,6 +491,7 @@ func TestParse_StrictIPv6HostPort(t *testing.T) {
 	}
 }
 
+// FuzzParseEntryPointParity checks consistent results and errors across parsing entry points.
 func FuzzParseEntryPointParity(f *testing.F) {
 	seeds := []struct {
 		format string
@@ -524,6 +556,7 @@ func sameParseError(left, right error) bool {
 	return reflect.TypeOf(left) == reflect.TypeOf(right) && left.Error() == right.Error()
 }
 
+// BenchmarkParse_SchemeHostPort measures scheme and endpoint parsing.
 func BenchmarkParse_SchemeHostPort(b *testing.B) {
 	p, _ := proxyparser.New("%t://%h:%d", true)
 	input := "http://proxy.example.com:8080"
@@ -533,6 +566,7 @@ func BenchmarkParse_SchemeHostPort(b *testing.B) {
 	}
 }
 
+// BenchmarkParse_FullCredentials measures parsing of schemes, endpoints, and credentials.
 func BenchmarkParse_FullCredentials(b *testing.B) {
 	p, _ := proxyparser.New("%t://%u:%p@%h:%d", true)
 	input := "socks5://alice:s3cr3t@proxy.example.com:1080"
@@ -542,6 +576,7 @@ func BenchmarkParse_FullCredentials(b *testing.B) {
 	}
 }
 
+// BenchmarkParseInto_FullCredentials measures credential parsing into a supplied destination.
 func BenchmarkParseInto_FullCredentials(b *testing.B) {
 	p, _ := proxyparser.New("%t://%u:%p@%h:%d", true)
 	input := "socks5://alice:s3cr3t@proxy.example.com:1080"
@@ -552,6 +587,7 @@ func BenchmarkParseInto_FullCredentials(b *testing.B) {
 	}
 }
 
+// BenchmarkParseString_FullCredentials measures credential parsing by value.
 func BenchmarkParseString_FullCredentials(b *testing.B) {
 	p, _ := proxyparser.New("%t://%u:%p@%h:%d", true)
 	input := "socks5://alice:s3cr3t@proxy.example.com:1080"
@@ -561,6 +597,7 @@ func BenchmarkParseString_FullCredentials(b *testing.B) {
 	}
 }
 
+// BenchmarkParseBytes_SchemeHostPort measures endpoint parsing from byte slices.
 func BenchmarkParseBytes_SchemeHostPort(b *testing.B) {
 	p, _ := proxyparser.New("%t://%h:%d", true)
 	input := []byte("http://proxy.example.com:8080")
@@ -571,6 +608,7 @@ func BenchmarkParseBytes_SchemeHostPort(b *testing.B) {
 	}
 }
 
+// BenchmarkParse_CustomDelimiters measures parsing with custom delimiters.
 func BenchmarkParse_CustomDelimiters(b *testing.B) {
 	p, _ := proxyparser.New("(%t)%h:%d:%u:%p", false)
 	input := "(http)res-us.lightningproxies.net:9999:admin:pass"
@@ -580,6 +618,7 @@ func BenchmarkParse_CustomDelimiters(b *testing.B) {
 	}
 }
 
+// BenchmarkParseInto_CustomDelimiters measures custom-delimiter parsing into a supplied destination.
 func BenchmarkParseInto_CustomDelimiters(b *testing.B) {
 	p, _ := proxyparser.New("(%t)%h:%d:%u:%p", false)
 	input := "(http)res-us.lightningproxies.net:9999:admin:pass"
@@ -590,6 +629,7 @@ func BenchmarkParseInto_CustomDelimiters(b *testing.B) {
 	}
 }
 
+// BenchmarkParse_Lenient_NoCredentials measures lenient parsing without credentials.
 func BenchmarkParse_Lenient_NoCredentials(b *testing.B) {
 	p, _ := proxyparser.New("%t://%u:%p@%h:%d", false)
 	input := "http://proxy.example.com:3128"
@@ -599,6 +639,7 @@ func BenchmarkParse_Lenient_NoCredentials(b *testing.B) {
 	}
 }
 
+// BenchmarkParseInto_Lenient_NoCredentials measures lenient parsing without credentials into a supplied destination.
 func BenchmarkParseInto_Lenient_NoCredentials(b *testing.B) {
 	p, _ := proxyparser.New("%t://%u:%p@%h:%d", false)
 	input := "http://proxy.example.com:3128"
@@ -609,6 +650,7 @@ func BenchmarkParseInto_Lenient_NoCredentials(b *testing.B) {
 	}
 }
 
+// BenchmarkParse_AutoScheme measures scheme detection when the format omits the scheme.
 func BenchmarkParse_AutoScheme(b *testing.B) {
 	p, _ := proxyparser.New("%h:%d", false)
 	input := "http://proxy.example.com:3128"
@@ -618,6 +660,7 @@ func BenchmarkParse_AutoScheme(b *testing.B) {
 	}
 }
 
+// BenchmarkParse_Lenient_OnlyUserNoPassword measures lenient parsing of a username without a password.
 func BenchmarkParse_Lenient_OnlyUserNoPassword(b *testing.B) {
 	p, _ := proxyparser.New("%t://%u@%h:%d", false)
 	input := "http://bob@proxy.example.com:3128"
@@ -627,6 +670,7 @@ func BenchmarkParse_Lenient_OnlyUserNoPassword(b *testing.B) {
 	}
 }
 
+// BenchmarkParse_HTTPS measures parsing of HTTPS proxy endpoints.
 func BenchmarkParse_HTTPS(b *testing.B) {
 	p, _ := proxyparser.New("%t://%h:%d", true)
 	input := "https://secure.proxy.com:443"
@@ -636,6 +680,7 @@ func BenchmarkParse_HTTPS(b *testing.B) {
 	}
 }
 
+// BenchmarkParse_SOCKS5H measures parsing of SOCKS5 proxies with remote host resolution.
 func BenchmarkParse_SOCKS5H(b *testing.B) {
 	p, _ := proxyparser.New("%t://%h:%d", true)
 	input := "socks5h://proxy.example.com:1080"
@@ -645,6 +690,7 @@ func BenchmarkParse_SOCKS5H(b *testing.B) {
 	}
 }
 
+// BenchmarkParse_EscapedPercent measures parsing of literal percent signs.
 func BenchmarkParse_EscapedPercent(b *testing.B) {
 	p, _ := proxyparser.New("%%%t://%h:%d", true)
 	input := "%http://proxy.example.com:8080"
@@ -654,6 +700,7 @@ func BenchmarkParse_EscapedPercent(b *testing.B) {
 	}
 }
 
+// BenchmarkParse_StrictIPv6HostPort measures strict parsing of bracketed IPv6 endpoints.
 func BenchmarkParse_StrictIPv6HostPort(b *testing.B) {
 	p, _ := proxyparser.New("%t://%h:%d", true)
 	input := "http://[2001:db8::1]:8080"
@@ -663,6 +710,7 @@ func BenchmarkParse_StrictIPv6HostPort(b *testing.B) {
 	}
 }
 
+// BenchmarkParse_MissingScheme_Lenient measures lenient rejection of a missing scheme.
 func BenchmarkParse_MissingScheme_Lenient(b *testing.B) {
 	p, _ := proxyparser.New("%h:%d", false)
 	input := "proxy.example.com:8080"
@@ -672,6 +720,7 @@ func BenchmarkParse_MissingScheme_Lenient(b *testing.B) {
 	}
 }
 
+// BenchmarkParse_InvalidProxyFormat measures rejection of invalid parsed proxy fields.
 func BenchmarkParse_InvalidProxyFormat(b *testing.B) {
 	p, _ := proxyparser.New("%t://%h:%d", true)
 	input := "badscheme://proxy.example.com:8080"
@@ -681,6 +730,7 @@ func BenchmarkParse_InvalidProxyFormat(b *testing.B) {
 	}
 }
 
+// BenchmarkParse_StrictMode_TrailingChars measures rejection of trailing input in strict parsing.
 func BenchmarkParse_StrictMode_TrailingChars(b *testing.B) {
 	p, _ := proxyparser.New("%t://%h:%d!", true)
 	input := "http://proxy.example.com:8080!extra"
@@ -690,6 +740,7 @@ func BenchmarkParse_StrictMode_TrailingChars(b *testing.B) {
 	}
 }
 
+// BenchmarkParse_StrictMode_MismatchDelimiter measures rejection of mismatched delimiters in strict parsing.
 func BenchmarkParse_StrictMode_MismatchDelimiter(b *testing.B) {
 	p, _ := proxyparser.New("(%t)%h:%d", true)
 	input := "http)proxy.example.com:8080"
@@ -699,6 +750,7 @@ func BenchmarkParse_StrictMode_MismatchDelimiter(b *testing.B) {
 	}
 }
 
+// BenchmarkParse_SubseqDelimNotFound_Strict measures rejection of missing delimiters in strict parsing.
 func BenchmarkParse_SubseqDelimNotFound_Strict(b *testing.B) {
 	p, _ := proxyparser.New("%t://%u:%p@%h:%d", true)
 	input := "http://user:passNOAT-proxy.example.com:8080"
@@ -708,6 +760,7 @@ func BenchmarkParse_SubseqDelimNotFound_Strict(b *testing.B) {
 	}
 }
 
+// BenchmarkParse_NilPlan measures parsing with a nil receiver.
 func BenchmarkParse_NilPlan(b *testing.B) {
 	p, _ := proxyparser.New("", false)
 	b.ReportAllocs()
@@ -716,6 +769,7 @@ func BenchmarkParse_NilPlan(b *testing.B) {
 	}
 }
 
+// BenchmarkParse_Idempotent measures consistent results from repeated parsing.
 func BenchmarkParse_Idempotent(b *testing.B) {
 	p, _ := proxyparser.New("%t://%u:%p@%h:%d", true)
 	input := "socks5://user:pass@proxy.example.com:1080"
@@ -726,6 +780,7 @@ func BenchmarkParse_Idempotent(b *testing.B) {
 	}
 }
 
+// BenchmarkParseInto_NilDestination measures rejection of a nil parsing destination.
 func BenchmarkParseInto_NilDestination(b *testing.B) {
 	p, _ := proxyparser.New("%t://%h:%d", true)
 	input := "http://proxy.example.com:8080"
@@ -735,6 +790,7 @@ func BenchmarkParseInto_NilDestination(b *testing.B) {
 	}
 }
 
+// BenchmarkParseInto_Shapes measures parsing across endpoint and credential shapes.
 func BenchmarkParseInto_Shapes(b *testing.B) {
 	shapes := []struct {
 		name, format, input string
@@ -799,6 +855,7 @@ func BenchmarkParseInto_Mixed(b *testing.B) {
 	}
 }
 
+// BenchmarkNew_InvalidFormatVerb measures rejection of unsupported format verbs.
 func BenchmarkNew_InvalidFormatVerb(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
@@ -806,6 +863,7 @@ func BenchmarkNew_InvalidFormatVerb(b *testing.B) {
 	}
 }
 
+// BenchmarkNew_FormatEndingWithPercent measures rejection of an incomplete format verb.
 func BenchmarkNew_FormatEndingWithPercent(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
@@ -813,6 +871,7 @@ func BenchmarkNew_FormatEndingWithPercent(b *testing.B) {
 	}
 }
 
+// BenchmarkNew_EscapedPercent measures compilation of a literal percent sign.
 func BenchmarkNew_EscapedPercent(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
@@ -820,6 +879,7 @@ func BenchmarkNew_EscapedPercent(b *testing.B) {
 	}
 }
 
+// BenchmarkNew_ValidFormats measures compilation of supported proxy formats.
 func BenchmarkNew_ValidFormats(b *testing.B) {
 	formats := []string{
 		"%t://%h",
@@ -836,6 +896,7 @@ func BenchmarkNew_ValidFormats(b *testing.B) {
 	}
 }
 
+// BenchmarkNew measures compilation of a standard proxy format.
 func BenchmarkNew(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
@@ -843,6 +904,7 @@ func BenchmarkNew(b *testing.B) {
 	}
 }
 
+// BenchmarkNew_LongFormat measures compilation of a long format.
 func BenchmarkNew_LongFormat(b *testing.B) {
 	format := strings.Repeat("%h:", 256) + "%d"
 	b.ReportAllocs()
@@ -851,6 +913,7 @@ func BenchmarkNew_LongFormat(b *testing.B) {
 	}
 }
 
+// TestParseSchemeCaseInsensitive checks scheme canonicalization across strict and lenient formats.
 func TestParseSchemeCaseInsensitive(t *testing.T) {
 	tests := []struct {
 		format string
@@ -884,6 +947,7 @@ func TestParseSchemeCaseInsensitive(t *testing.T) {
 	}
 }
 
+// TestParseErrorWrapsValidateSentinel checks that parsing errors preserve validation sentinels.
 func TestParseErrorWrapsValidateSentinel(t *testing.T) {
 	tests := []struct {
 		format, input string

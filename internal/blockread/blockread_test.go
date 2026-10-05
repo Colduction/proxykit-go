@@ -1,3 +1,4 @@
+// Package blockread_test verifies positional reads and read-ahead through [blockread].
 package blockread_test
 
 import (
@@ -30,6 +31,7 @@ func pattern(n int) []byte {
 	return content
 }
 
+// TestMakeBuffer checks [blockread.MakeBuffer] alignment and retained byte counts.
 func TestMakeBuffer(t *testing.T) {
 	for _, capacity := range []int{0, 1, 4095, blockread.AlignedBytes - 1, blockread.AlignedBytes, 1 << 20, 4<<20 + 4098} {
 		length := min(3, capacity)
@@ -50,6 +52,7 @@ func TestMakeBuffer(t *testing.T) {
 	}
 }
 
+// TestReaderReadAt checks [blockread.Reader.ReadAt] byte counts and contents.
 func TestReaderReadAt(t *testing.T) {
 	content := pattern(10_000)
 	for _, sequential := range []bool{false, true} {
@@ -86,6 +89,8 @@ func TestReaderReadAt(t *testing.T) {
 	}
 }
 
+// TestReaderReadAtBoundaries compares [blockread.Reader.ReadAt] with [os.File.ReadAt]
+// for empty buffers, end-of-file reads, and negative offsets.
 func TestReaderReadAtBoundaries(t *testing.T) {
 	path := writeFile(t, []byte("abcdef"))
 	file, err := blockread.OpenSource(path, false)
@@ -112,6 +117,7 @@ func TestReaderReadAtBoundaries(t *testing.T) {
 	}
 }
 
+// TestHints checks [blockread.Hints] availability and advice submission.
 func TestHints(t *testing.T) {
 	file, err := blockread.OpenSource(writeFile(t, pattern(1<<20)), false)
 	if err != nil {

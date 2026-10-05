@@ -1,9 +1,9 @@
 package proxypool
 
-// BatchReindex rebuilds the line offsets of batch from its resident buffer
-// with the pool's indexing routine and rewinds the batch to its first line,
-// so that a benchmark measures indexing and iteration without a read.
-// The block must have been handed over whole.
+// BatchReindex rebuilds the supplied batch's line offsets from its resident
+// buffer and rewinds to the requested permutation position. The batch must
+// contain a complete transferred block. Benchmarks can use it to measure
+// indexing and iteration without a read.
 func BatchReindex(batch *Batch, first int) {
 	lineStart, end := int(batch.offsets[0]), int(batch.offsets[len(batch.offsets)-1])
 	pool := Pool{
@@ -24,25 +24,26 @@ func BatchReindex(batch *Batch, first int) {
 	BatchRewind(batch, first)
 }
 
-// BatchRewind makes batch return its lines again from permutation position
-// first, which [BatchFirst] reported before the first call of [Batch.Next].
+// BatchRewind makes the supplied batch return its lines again from a
+// permutation position reported by [BatchFirst] before the first [Batch.Next] call.
 func BatchRewind(batch *Batch, first int) {
 	batch.next, batch.remaining = first, len(batch.offsets)-1
 }
 
-// BatchFirst returns the permutation position of the next line of batch.
+// BatchFirst returns the permutation position of the supplied batch's next line.
 func BatchFirst(batch *Batch) int {
 	return batch.next
 }
 
-// Direct reports whether pool reads ahead without buffering.
+// Direct reports whether the supplied pool reads ahead without buffering.
 func Direct(pool *Pool) bool {
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 	return pool.ahead != nil && pool.ahead.Direct()
 }
 
-// BatchOffsets returns the line offsets of batch for tests of the index.
+// BatchOffsets returns the supplied batch's line offsets for index tests.
+// The returned slice aliases batch-owned storage.
 func BatchOffsets(batch *Batch) []uint32 {
 	return batch.offsets
 }

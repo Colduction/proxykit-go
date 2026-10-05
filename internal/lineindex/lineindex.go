@@ -1,16 +1,10 @@
-// Package lineindex finds the line feeds of text and writes the offset just
-// past each one, 64 bytes at a time with AVX-512 or AVX2 on amd64 and NEON on
-// arm64, and in pure Go everywhere else.
+// Package lineindex locates line feeds and measures gaps between line offsets.
+// It uses processor-specific vector kernels when available and portable Go elsewhere.
 //
-// The vector kernels follow the structural indexing of simdjson: a vector
-// compare turns each block of 64 bytes into a 64-bit mask, and the positions of
-// its set bits are stored with a fixed number of unconditional stores that the
-// count of set bits then accepts, which avoids a branch per line feed. The pure
-// Go kernel tests eight bytes per machine word while lines are short and
-// searches line by line with bytes.IndexByte while they are long, whichever
-// costs less for the text at hand. The package shares the backend of
-// internal/structuralindex, so one call of structuralindex.SetBackend selects
-// the kernel of both.
+// The package shares its active backend with
+// [github.com/colduction/proxykit-go/internal/structuralindex].
+// [github.com/colduction/proxykit-go/internal/structuralindex.SetBackend]
+// selects the kernel for both packages.
 //
 // See Langdale and Lemire, [Parsing Gigabytes of JSON per Second], and
 // Lemire, [Iterating over set bits quickly].
@@ -21,27 +15,28 @@ package lineindex
 
 const blockBytes = 64
 
-// Ends stores the line ends of src in dst in ascending order and returns the
-// number it stored and the number of bytes of src it examined. A line end is
-// base plus the index just past a line feed.
+// Ends stores the source's line ends in the destination in ascending order.
+// It returns the number stored, the number of source bytes examined, and a
+// carriage-return hint. A line end is the base offset plus the position just
+// past a line feed. An empty source produces zero counts and a false hint.
 //
-// The cr result is a hint for trimming carriage returns: it is true when a line
-// feed that Ends found follows a carriage return in src, false when the
-// examined bytes hold no carriage return, and either otherwise. A line feed at
-// src[0] never counts as following one, so a caller that continues in the
-// middle of text tests the byte before src itself.
+// The hint is true when an examined line feed follows a carriage return,
+// false when the examined bytes contain no carriage return, and either otherwise.
+// A line feed at the source's first byte never counts as following a carriage
+// return, so a caller continuing in the middle of text checks the preceding byte.
 //
-// Ends stores without a check per line feed, so it needs room. It stops early
-// only when fewer than 64 elements of dst remain past the ones it stored and
-// fewer remain than bytes of src remain to examine. A caller then continues with
-// Ends(dst[written:], src[consumed:], base+uint32(consumed)) after making room.
-// A dst of at least 64 elements, or of at least len(src) elements, always makes
-// progress. Elements of dst at index written and beyond may be overwritten with
-// unspecified values.
+// [Ends] stops early only when fewer than 64 destination elements remain
+// after the stored ends and fewer elements remain than unexamined source bytes.
+// A destination with at least 64 elements, or at least as many elements as
+// source bytes, always makes progress on a nonempty source.
+// The caller can resume with the unused destination, unexamined source,
+// and base offset advanced by the consumed byte count.
+// Destination elements beyond the stored ends may be overwritten with unspecified values.
 //
-// base+len(src) must not exceed the largest uint32. Ends must not run
-// concurrently with structuralindex.SetBackend. It does not retain its
-// arguments and does not allocate.
+// The base offset plus the source length must fit in an unsigned 32-bit integer.
+// [Ends] must not run concurrently with
+// [github.com/colduction/proxykit-go/internal/structuralindex.SetBackend].
+// It does not retain its arguments and does not allocate.
 func Ends(dst []uint32, src []byte, base uint32) (written, consumed int, cr bool) {
 	if !vectorized() {
 		return endsScalar(dst, src, base)
@@ -63,11 +58,12 @@ func Ends(dst []uint32, src []byte, base uint32) (written, consumed int, cr bool
 	return written + n, len(src), cr || tailCR
 }
 
-// MaxGap returns the largest difference between consecutive elements of
-// offsets, which for a line start followed by the ends of lines is the length
-// of the longest of those lines, including its line feed. It returns 0 for
-// fewer than two elements. The elements must not decrease. MaxGap must not run
-// concurrently with structuralindex.SetBackend and does not allocate.
+// MaxGap returns the largest difference between consecutive offsets.
+// For a line start followed by line ends, this is the longest line's length,
+// including its line feed. It returns zero for fewer than two offsets.
+// The offsets must not decrease. [MaxGap] must not run concurrently with
+// [github.com/colduction/proxykit-go/internal/structuralindex.SetBackend]
+// and does not allocate.
 func MaxGap(offsets []uint32) uint32 {
 	if len(offsets) < 2 {
 		return 0

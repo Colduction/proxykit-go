@@ -9,6 +9,8 @@ import (
 	"github.com/colduction/proxykit-go/proxypool"
 )
 
+// TestOpenRejectsFIFOWithoutWriter checks that a FIFO is rejected without waiting for a writer.
+// Its timeout cleanup releases a reader blocked on the FIFO.
 func TestOpenRejectsFIFOWithoutWriter(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "proxies.fifo")
 	if err := syscall.Mkfifo(path, 0o600); err != nil {
@@ -28,9 +30,6 @@ func TestOpenRejectsFIFOWithoutWriter(t *testing.T) {
 			t.Fatal("Open accepted a FIFO")
 		}
 	case <-time.After(2 * time.Second):
-		// A writer releases an open blocked on the FIFO before the test fails.
-		// Read-write and nonblocking flags make this cleanup independent of
-		// whether the reader has reached the kernel yet.
 		fd, err := syscall.Open(path, syscall.O_RDWR|syscall.O_NONBLOCK, 0)
 		if err != nil {
 			t.Fatalf("Open blocked on a FIFO, and releasing it failed: %v", err)

@@ -4,9 +4,8 @@ package fileopen
 
 import "syscall"
 
-// Fadvise gives the kernel access-pattern advice for fd over the byte range
-// starting at offset and extending for length bytes. It returns
-// [syscall.ENOSYS] on these platforms, where the call is unavailable.
+// Fadvise returns [syscall.ENOSYS] because access-pattern advice is unavailable
+// on this platform.
 func Fadvise(int, int64, int64, int) error {
 	return syscall.ENOSYS
 }

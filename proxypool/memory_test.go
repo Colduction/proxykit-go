@@ -39,7 +39,7 @@ func TestSmallSourceRetainedMemory(t *testing.T) {
 	}
 }
 
-// TestBatchStorageFromLargerSourceIsDropped checks storage reuse across files with identical options.
+// TestBatchStorageFromLargerSourceIsDropped checks bounded storage reuse across files with identical options.
 func TestBatchStorageFromLargerSourceIsDropped(t *testing.T) {
 	for _, prefetch := range []bool{false, true} {
 		options := proxypool.Options{SequentialBufferBytes: 64 << 10, MaxLineBytes: 1 << 20, Reuse: true, Prefetch: prefetch}
@@ -72,7 +72,7 @@ func TestBatchStorageFromLargerSourceIsDropped(t *testing.T) {
 	}
 }
 
-// BenchmarkSmallSourceContinuation measures allocation and retained storage for a fresh small-file pool.
+// BenchmarkSmallSourceContinuation measures allocations and retained storage for a fresh small-file pool.
 func BenchmarkSmallSourceContinuation(b *testing.B) {
 	path := writeFile(b, strings.Repeat("x", 100)+"\n")
 	options := proxypool.Options{SequentialBufferBytes: 16, MaxLineBytes: 1 << 30}

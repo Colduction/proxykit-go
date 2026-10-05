@@ -9,22 +9,22 @@ import (
 // A Batch holds the lines of one block that [Pool.NextBatch] handed over.
 // Its zero value is empty and ready for use.
 //
-// A Batch owns the block storage it holds and must not be copied after first
+// A [Batch] owns the block storage it holds and must not be copied after first
 // use. It is not safe for concurrent use; give each goroutine its own. Lines
-// that [Batch.Next] returns alias that storage and stay valid until the Batch
+// that [Batch.Next] returns alias that storage and stay valid until the [Batch]
 // is passed to [Pool.NextBatch] again, even after the pool is reset or closed.
 // A returned line has no spare capacity, so appending to it copies it.
-// Passing a Batch back lets the pool reuse storage that fits its block,
+// Passing a [Batch] back lets the pool reuse storage that fits its block,
 // line, and source-size limits; larger storage is dropped.
 type Batch struct {
 	noCopy    noCopy
+	offsets   []uint32
+	buffer    []byte
 	remaining int
 	next      int
 	back      int
 	lines     int
 	calls     uint64
-	offsets   []uint32
-	buffer    []byte
 	cr        bool
 }
 
@@ -53,11 +53,10 @@ func (batch *Batch) Next() ([]byte, bool) {
 }
 
 // Lines returns an iterator over the lines that [Batch.Next] has not
-// returned yet, in the same order and form. It keeps its position in
-// registers, which makes it cheaper per line than calling Next. When the loop
-// stops early, the lines it did not reach remain for Next or another
+// returned yet, in the same order and form. When the loop stops early,
+// the lines it did not reach remain for [Batch.Next] or another
 // iteration; when its body panics, the batch keeps the position it had when
-// the loop began. The body of the loop must not call Next, and it panics if
+// the loop began. The body of the loop must not call [Batch.Next], and it panics if
 // the body passes the batch to [Pool.NextBatch].
 func (batch *Batch) Lines() iter.Seq[[]byte] {
 	return func(yield func([]byte) bool) {
@@ -163,11 +162,11 @@ func trimReturn(base unsafe.Pointer, end uint32) uint32 {
 	return end
 }
 
-// NextBatch fills batch with the lines of the next block and takes over the
-// storage batch held, so that a Batch passed back on every call allocates
+// NextBatch fills the destination batch with the lines of the next block and takes over the
+// storage it held, so that a [Batch] passed back on every call allocates
 // nothing in steady state. When the pool has returned some lines of its
 // current block through [Pool.Next] or [Pool.NextBytes], the batch receives
-// the remaining ones. Lines given to a Batch count as returned in
+// the remaining ones. Lines given to a [Batch] count as returned in
 // [Stats.Cursor].
 //
 // It returns [ErrNilBatch] for a nil batch and otherwise the errors of

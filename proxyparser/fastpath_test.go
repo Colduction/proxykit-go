@@ -26,6 +26,7 @@ func checkMatchesScalar(t testing.TB, backend structuralindex.Backend, parser *p
 	}
 }
 
+// TestFastHostPortEdges checks that fast validation accepts no invalid endpoint boundary cases.
 func TestFastHostPortEdges(t *testing.T) {
 	label63 := strings.Repeat("a", 63)
 	hostPorts := []string{
@@ -78,6 +79,7 @@ var scalarParityFormats = []struct {
 	{"", false},
 }
 
+// TestParseMatchesScalar checks parser results and errors against scalar parsing across supported backends.
 func TestParseMatchesScalar(t *testing.T) {
 	long := strings.Repeat("u", 40)
 	inputs := []string{
@@ -106,6 +108,7 @@ func TestParseMatchesScalar(t *testing.T) {
 	})
 }
 
+// FuzzParseMatchesScalar compares parser entry points with scalar parsing across formats and backends.
 func FuzzParseMatchesScalar(f *testing.F) {
 	for i, format := range scalarParityFormats {
 		f.Add(format.format, "http://proxy.example.com:8080", format.strict)

@@ -13,7 +13,7 @@ func (pp *Parse) ParseIntoScalar(input string, proxy *proxykit.Proxy) error {
 	return pp.parseInto(input, proxy, false)
 }
 
-// IsHostPortFast exposes the fast host and port test. With indexed set it
+// IsHostPortFast exposes the fast host and port test. With structural indexing enabled it
 // uses the structural index and reports false when none can be built.
 func IsHostPortFast(hostPort string, indexed bool) bool {
 	var ix structuralindex.Index

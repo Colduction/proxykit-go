@@ -4,17 +4,15 @@
 //
 // It has two tiers.
 // An [Index] is a structural index in the sense of Mison and simdjson:
-// one 64-bit bitmap per byte class, bit i describing byte i,
+// one 64-bit bitmap per byte class, each bit describing a byte position,
 // filled by a vector kernel written in Go assembly
-// (AVX-512 or AVX2 on amd64, NEON on arm64)
+// (the [AVX512] or [AVX2] backend on amd64, and [NEON] on arm64)
 // and queried with [math/bits] operations.
 // [IsHostName] and [IsPrintable] are the portable tier:
 // they test eight bytes per 64-bit word (SIMD within a register),
-// need no assembly, and have no 64-byte input limit,
-// though IsHostName leaves a name over 63 bytes to its caller.
-// The purego build tag selects the portable tier alone,
-// and so does netbsd on amd64, whose kernel has corrupted AVX state
-// across signals.
+// need no assembly, and operate independently of the vector input limit.
+// [IsHostName] rejects names longer than 63 bytes; [IsPrintable] has no length limit.
+// The purego build tag and netbsd on amd64 select the portable tier alone.
 //
 // The package holds mechanism only.
 // Which byte ranges must satisfy which class is the caller's policy.
@@ -47,7 +45,7 @@ const MaxLen = 64
 // A Class identifies one byte class of an [Index].
 type Class uint8
 
-// The byte classes of an [Index].
+// The byte classes identify delimiters, alphanumeric bytes, and unprintable bytes.
 const (
 	// Colon is the class of ':'.
 	Colon Class = iota
@@ -64,8 +62,9 @@ const (
 	classCount
 )
 
-// ClassOf returns the [Class] that holds exactly the byte b
-// and reports whether there is one.
+// ClassOf returns the delimiter class for a colon, at sign, dot, or hyphen
+// and reports whether the byte has such a class.
+// For all other bytes it returns zero and false.
 func ClassOf(b byte) (Class, bool) {
 	switch b {
 	case ':':
@@ -82,21 +81,25 @@ func ClassOf(b byte) (Class, bool) {
 }
 
 // An Index holds one bitmap per [Class] for a text of at most [MaxLen] bytes.
-// Bit i of a bitmap is set when byte i of the text belongs to the class;
+// Each set bit identifies a byte position belonging to the class;
 // bits at and above the text length are clear.
-// The zero Index describes the empty text.
-// An Index holds no reference to the text.
+// The zero [Index] describes empty text.
+// An [Index] holds no reference to the source text.
+// Reads may run concurrently while no goroutine modifies the index.
 type Index struct {
 	bitmaps [classCount]uint64
 }
 
-// Bitmap returns the bitmap of class c.
+// Bitmap returns the bitmap for the requested class.
+// It panics if the class is outside the declared byte classes.
 func (ix *Index) Bitmap(c Class) uint64 {
 	return ix.bitmaps[c]
 }
 
-// Next returns the position of the first byte of class c at or after from,
-// or -1 if there is none. from must be in the range 0 to [MaxLen].
+// Next returns the position of the first byte in the requested class at or
+// after the starting position, or -1 if there is none.
+// The starting position must be in the range 0 to [MaxLen].
+// It panics if the class is outside the declared byte classes.
 func (ix *Index) Next(c Class, from int) int {
 	remaining := ix.bitmaps[c] &^ LowMask(from)
 	if remaining == 0 {
@@ -105,14 +108,14 @@ func (ix *Index) Next(c Class, from int) int {
 	return bits.TrailingZeros64(remaining)
 }
 
-// LowMask returns a bitmap with bits 0 to n-1 set.
-// n must be in the range 0 to [MaxLen].
+// LowMask returns a bitmap with the requested number of low bits set.
+// The count must be in the range 0 to [MaxLen].
 func LowMask(n int) uint64 {
 	return 1<<uint(n) - 1
 }
 
-// Range returns a bitmap with bits start to end-1 set.
-// It requires 0 <= start <= end <= [MaxLen].
+// Range returns a bitmap for the half-open interval of bit positions.
+// The start and end must be in the range 0 to [MaxLen], with the start no greater than the end.
 func Range(start, end int) uint64 {
 	return LowMask(end) &^ LowMask(start)
 }

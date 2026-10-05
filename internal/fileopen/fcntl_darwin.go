@@ -4,8 +4,8 @@ package fileopen
 
 import "syscall"
 
-// FcntlInt invokes fcntl on fd with integer command cmd and argument arg and
-// returns the result and the error the kernel reports.
+// FcntlInt issues a file-control command with an integer argument for a file
+// descriptor and returns the result and error reported by the kernel.
 func FcntlInt(fd uintptr, cmd, arg int) (int, error) {
 	value, _, errno := syscall.Syscall(syscall.SYS_FCNTL, fd, uintptr(cmd), uintptr(arg))
 	if errno != 0 {

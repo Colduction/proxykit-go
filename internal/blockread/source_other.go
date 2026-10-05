@@ -8,8 +8,8 @@ import (
 	"github.com/colduction/proxykit-go/internal/fileopen"
 )
 
-// OpenSource opens name for reading with a [Reader], with the platform's
-// hint of sequential reading when sequential is true.
+// OpenSource opens the named file for reading with a [Reader].
+// The sequential option requests a sequential-access hint where supported.
 func OpenSource(name string, sequential bool) (*os.File, error) {
 	return fileopen.Open(name, os.O_RDONLY, 0, sequential)
 }

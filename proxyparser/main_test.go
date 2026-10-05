@@ -1,3 +1,4 @@
+// Package proxyparser_test verifies format parsing, scalar parity, and concurrent use.
 package proxyparser_test
 
 import (

@@ -5,7 +5,6 @@ package lineindex
 import "github.com/colduction/proxykit-go/internal/structuralindex"
 
 func vectorized() bool {
-	// It reports whether the active backend has a vector kernel.
 	return structuralindex.ActiveBackend() != structuralindex.Portable
 }
 

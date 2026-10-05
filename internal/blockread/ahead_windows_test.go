@@ -9,9 +9,8 @@ import (
 	"github.com/colduction/proxykit-go/internal/blockread"
 )
 
-// An Ahead keeps reads in flight in slots that hold their storage; the tests
-// run it buffered and without buffering, which needs page-aligned storage,
-// offsets, and lengths.
+// TestAhead checks [blockread.Ahead] slot reuse, completion, cancellation,
+// and storage retention for buffered and direct reads.
 func TestAhead(t *testing.T) {
 	const blockBytes = 64 << 10
 	content := pattern(10*blockBytes + 1234)
@@ -55,8 +54,6 @@ func TestAhead(t *testing.T) {
 					slot := ahead.Find(current)
 					start := current * blockBytes
 					if start >= int64(len(content)) {
-						// A read at the end of the file fails at once and
-						// leaves no read in flight, or completes with nothing.
 						if slot >= 0 {
 							if _, _, read, err := ahead.Wait(slot); read != 0 || !errors.Is(err, io.EOF) {
 								t.Fatalf("block %d: read past the end = %d, %v", current, read, err)

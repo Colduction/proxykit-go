@@ -7,8 +7,7 @@ import (
 	"syscall"
 )
 
-// FlagSequentialScan is FILE_FLAG_SEQUENTIAL_SCAN, which [os.OpenFile]
-// passes to CreateFile on Windows.
+// FlagSequentialScan requests Windows sequential-access caching through [os.OpenFile].
 const FlagSequentialScan = 0x08000000
 
 func open(name string, flag int, perm os.FileMode, sequential bool) (*os.File, error) {

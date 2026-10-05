@@ -9,6 +9,7 @@ import (
 	"github.com/colduction/proxykit-go/proxyparser"
 )
 
+// TestProxyParserConcurrentUse checks concurrent parsing with separate destinations.
 func TestProxyParserConcurrentUse(t *testing.T) {
 	parser, err := proxyparser.New("%t://%u:%p@%h:%d", true)
 	if err != nil {

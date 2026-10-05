@@ -14,9 +14,7 @@ import (
 	"github.com/colduction/proxykit-go/proxypool"
 )
 
-// TestOffsetsSlackAllLineFeeds fills blocks with nothing but line feeds, the
-// most offsets a block can hold, at and around the sizes where the offsets
-// reach their bound, so that indexing must progress with the least room.
+// TestOffsetsSlackAllLineFeeds checks progress and storage bounds when blocks contain the maximum number of line offsets.
 func TestOffsetsSlackAllLineFeeds(t *testing.T) {
 	for _, n := range []int{1, 63, 64, 65, 127, 128, 129, 4095, 4096, 4097} {
 		path := writeFile(t, strings.Repeat("\n", n))
@@ -47,6 +45,7 @@ func TestOffsetsSlackAllLineFeeds(t *testing.T) {
 	}
 }
 
+// TestSequentialMatchesFileOrderAcrossBlocks checks physical line order and retained-memory bounds at several block sizes.
 func TestSequentialMatchesFileOrderAcrossBlocks(t *testing.T) {
 	path, want := makeProxyFile(t, 1_000)
 	for _, blockBytes := range []int{1, 2, 3, 7, 16, 64, 4096, 1 << 20} {
@@ -69,6 +68,7 @@ func TestSequentialMatchesFileOrderAcrossBlocks(t *testing.T) {
 	}
 }
 
+// TestSequentialLineShapesEveryBoundary checks sequential line endings at every small-block boundary.
 func TestSequentialLineShapesEveryBoundary(t *testing.T) {
 	for _, content := range batchLayouts {
 		for blockBytes := 1; blockBytes <= 17; blockBytes++ {
@@ -88,9 +88,7 @@ func TestSequentialLineShapesEveryBoundary(t *testing.T) {
 	}
 }
 
-// A shuffled block reads the byte before it only when it does not follow the
-// block loaded before it; the other blocks take that byte from the previous
-// load. Regions of three blocks mix both kinds of load at every boundary.
+// TestShuffledLineShapesEveryBoundary checks shuffled line endings across contiguous and noncontiguous block loads.
 func TestShuffledLineShapesEveryBoundary(t *testing.T) {
 	for _, content := range batchLayouts {
 		for blockBytes := 1; blockBytes <= 17; blockBytes++ {
@@ -121,9 +119,7 @@ func TestShuffledLineShapesEveryBoundary(t *testing.T) {
 	}
 }
 
-// TestSequentialErrorPoisonsBlock pins the error timing of the block engine:
-// a line over the limit fails the block that holds it when the block loads,
-// before the lines ahead of it in that block.
+// TestSequentialErrorPoisonsBlock checks that an overlong line fails its block before earlier lines in that block are returned.
 func TestSequentialErrorPoisonsBlock(t *testing.T) {
 	content := "a\nb\n" + strings.Repeat("x", 70_000) + "\nc\n"
 	pool, err := proxypool.Open(writeFile(t, content), proxypool.Options{})
@@ -155,6 +151,7 @@ func errorOffset(t *testing.T, err error) int64 {
 	return offset
 }
 
+// TestLineTooLongReportsAbsoluteOffset checks source-byte offsets in [proxypool.ErrLineTooLong] errors.
 func TestLineTooLongReportsAbsoluteOffset(t *testing.T) {
 	const limit = 8
 	for _, prefix := range []string{"", "a\n", "abc\r\n", strings.Repeat("y\n", 20)} {
@@ -186,8 +183,7 @@ func TestLineTooLongReportsAbsoluteOffset(t *testing.T) {
 	}
 }
 
-// TestLineLimitFinalLine covers the final line of a file in one block, whose
-// limit the gap of its offsets alone cannot decide.
+// TestLineLimitFinalLine checks length limits for terminated and unterminated final lines.
 func TestLineLimitFinalLine(t *testing.T) {
 	const limit = 16
 	tests := []struct {
@@ -223,6 +219,7 @@ func TestLineLimitFinalLine(t *testing.T) {
 	}
 }
 
+// TestShortReadReportsSourceChanged checks that truncated sources produce [proxypool.ErrSourceChanged].
 func TestShortReadReportsSourceChanged(t *testing.T) {
 	for _, mode := range []proxypool.Mode{proxypool.ModeSequential, proxypool.ModeShuffled} {
 		path, _ := makeProxyFile(t, 200)
@@ -249,9 +246,7 @@ func TestShortReadReportsSourceChanged(t *testing.T) {
 	}
 }
 
-// TestBatchLinesStopsAndResumes breaks out of Batch.Lines at every position
-// and continues with Next and another Lines, which must together return the
-// order Pool.Next returns.
+// TestBatchLinesStopsAndResumes checks that interrupted [proxypool.Batch.Lines] iterations and [proxypool.Batch.Next] preserve the order of [proxypool.Pool.Next].
 func TestBatchLinesStopsAndResumes(t *testing.T) {
 	path, _ := makeProxyFile(t, 300)
 	for _, content := range []string{"", "crlf"} {
@@ -312,6 +307,7 @@ func TestBatchLinesStopsAndResumes(t *testing.T) {
 	}
 }
 
+// ExamplePool_NextBatch shows block iteration with [proxypool.Pool.NextBatch] and [proxypool.Batch.Lines].
 func ExamplePool_NextBatch() {
 	path := writeExampleFile("http://192.0.2.1:8080\nsocks5://alice:secret@203.0.113.7:1080\r\n")
 	defer os.Remove(path)
@@ -333,9 +329,6 @@ func ExamplePool_NextBatch() {
 			fmt.Println(string(line))
 		}
 	}
-	// Output:
-	// http://192.0.2.1:8080
-	// socks5://alice:secret@203.0.113.7:1080
 }
 
 func writeExampleFile(content string) string {

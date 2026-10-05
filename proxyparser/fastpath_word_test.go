@@ -45,6 +45,7 @@ func checkIPv4(t testing.TB, host string) {
 	}
 }
 
+// TestFastIPv4EveryOctetCombination checks IPv4 validation across representative octet combinations.
 func TestFastIPv4EveryOctetCombination(t *testing.T) {
 	octets := []string{
 		"", "0", "1", "5", "9", "00", "01", "09", "10", "25", "55", "99", "000", "001", "010", "099", "100", "199",
@@ -69,6 +70,7 @@ func TestFastIPv4EveryOctetCombination(t *testing.T) {
 	}
 }
 
+// TestFastIPv4EveryByteAtEveryPosition checks IPv4 validation after byte and delimiter mutations.
 func TestFastIPv4EveryByteAtEveryPosition(t *testing.T) {
 	addresses := []string{
 		"1.2.3.4", "10.2.3.4", "1.20.3.4", "1.2.30.4", "1.2.3.40", "10.20.3.4", "1.2.30.40", "100.2.3.4", "1.2.3.255",
@@ -94,6 +96,7 @@ func TestFastIPv4EveryByteAtEveryPosition(t *testing.T) {
 	}
 }
 
+// TestFastIPv4ExhaustiveShortHosts checks IPv4 validation over short texts from a boundary alphabet.
 func TestFastIPv4ExhaustiveShortHosts(t *testing.T) {
 	const alphabet = "0129./"
 	limit := 9
@@ -118,6 +121,7 @@ func TestFastIPv4ExhaustiveShortHosts(t *testing.T) {
 	}
 }
 
+// FuzzFastIPv4 compares fast IPv4 validation with byte-wise validation.
 func FuzzFastIPv4(f *testing.F) {
 	for _, seed := range []string{"1.2.3.4", "192.0.2.146", "255.255.255.255", "256.1.1.1", "01.2.3.4", "1..2.3", "1.2.3.4.5"} {
 		f.Add(seed)
@@ -187,6 +191,7 @@ func TestFastCredentialsMatchScalar(t *testing.T) {
 	visit(nil, limit)
 }
 
+// TestFastSchemeMatchesScalar checks scheme and separator handling against scalar parsing.
 func TestFastSchemeMatchesScalar(t *testing.T) {
 	schemes := []string{
 		"http", "https", "socks4", "socks4a", "socks5", "socks5h", "HTTP", "Http", "httpx", "htt", "httpss", "socks", "socks6",

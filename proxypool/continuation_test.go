@@ -8,6 +8,7 @@ import (
 	"github.com/colduction/proxykit-go/proxypool"
 )
 
+// TestContinuationBlocksAcrossCyclesAndShards checks complete continuation coverage across reuse cycles, rewinds, and shards.
 func TestContinuationBlocksAcrossCyclesAndShards(t *testing.T) {
 	for _, ending := range []string{"\n", "\r\n", ""} {
 		content := "first\n" + strings.Repeat("x", 257) + "\r\n\n" + strings.Repeat("y", 128) + "\n" + strings.Repeat("z", 129) + ending
@@ -73,6 +74,7 @@ func TestContinuationBlocksAcrossCyclesAndShards(t *testing.T) {
 	}
 }
 
+// BenchmarkSequentialContinuation measures sequential reads of lines larger than the configured block size.
 func BenchmarkSequentialContinuation(b *testing.B) {
 	path := writeFile(b, strings.Repeat(strings.Repeat("x", 1<<10)+"\n", 200))
 	pool, err := proxypool.Open(path, proxypool.Options{

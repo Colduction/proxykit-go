@@ -3,7 +3,7 @@ package structuralindex
 // A Backend identifies the implementation that fills an [Index].
 type Backend uint8
 
-// The backends. The amd64 assembly reads the value of AVX512.
+// The backends select portable byte tests or architecture-specific vector kernels.
 const (
 	// Portable uses no vector kernel: [Index.Build] reports false
 	// and callers rely on [IsHostName] and [IsPrintable].
@@ -19,7 +19,7 @@ const (
 
 var active, fastest Backend
 
-// String returns the name of b.
+// String returns the backend name, or "unknown" for an unrecognized value.
 func (b Backend) String() string {
 	switch b {
 	case Portable:
@@ -42,11 +42,11 @@ func ActiveBackend() Backend {
 	return active
 }
 
-// SetBackend makes b the active backend and returns the previous one.
-// It ignores a backend the processor does not support,
-// so the result of a following [ActiveBackend] call tells whether b took effect.
-// It exists for tests and benchmarks that compare backends
-// and must not run concurrently with [Index.Build].
+// SetBackend selects the requested backend and returns the previous one.
+// It ignores a backend the processor and operating system do not support,
+// so a following [ActiveBackend] call reports whether the selection took effect.
+// It supports tests and benchmarks that compare backends and must not run
+// concurrently with any operation that reads or changes the active backend.
 func SetBackend(b Backend) Backend {
 	previous := active
 	if b == Portable || b == fastest || (b == AVX2 && fastest == AVX512) {

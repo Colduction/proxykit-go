@@ -7,15 +7,12 @@ import (
 	"github.com/colduction/proxykit-go/internal/structuralindex"
 )
 
-// TestBuildCoversBothLoadDirections runs every byte value at every position
-// of texts placed against the end of a page followed by a protected page, and
-// asserts that the addresses select the forward and the backward load of both
-// the one-vector and the two-vector path of the AVX2 kernel.
+// TestBuildCoversBothLoadDirections checks representative boundary bytes with
+// forward and backward loads in the one-vector and two-vector paths of
+// [structuralindex.AVX2].
 func TestBuildCoversBothLoadDirections(t *testing.T) {
 	page := guardedPage(t)
 	for _, backend := range vectorBackends(t) {
-		// Only the AVX2 kernel chooses a load by address, and
-		// TestBuildEveryByteAtEveryPosition owns the sweep of all byte values.
 		if backend != structuralindex.AVX2 {
 			continue
 		}
@@ -30,9 +27,6 @@ func TestBuildCoversBothLoadDirections(t *testing.T) {
 				for i := range page {
 					page[i] = ":@/.-5q\x7f"[i%8]
 				}
-				// The kernel loads one vector of 32 bytes for a text of at
-				// most 32 bytes and two otherwise, and it loads backward when
-				// a forward load would cross the end of the page.
 				vectors, direction := 0, 0
 				if n > 32 {
 					vectors = 1

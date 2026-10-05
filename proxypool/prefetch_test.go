@@ -12,12 +12,10 @@ import (
 )
 
 func prefetchSupported() bool {
-	// It reports whether Options.Prefetch takes effect here: the
-	// hints exist on Linux and macOS, fadvise needs a 64-bit Linux, and
-	// Windows reads ahead with overlapped reads.
 	return runtime.GOOS == "darwin" || runtime.GOOS == "windows" || runtime.GOOS == "linux" && bits.UintSize == 64
 }
 
+// TestPrefetchMatchesWithout checks line order, platform support, and storage bounds with kernel read-ahead enabled.
 func TestPrefetchMatchesWithout(t *testing.T) {
 	path, _ := makeProxyFile(t, 3_000)
 	for _, mode := range []proxypool.Mode{proxypool.ModeSequential, proxypool.ModeShuffled} {
@@ -64,6 +62,7 @@ func TestPrefetchMatchesWithout(t *testing.T) {
 	}
 }
 
+// TestPrefetchStartsNoGoroutines checks that kernel read-ahead starts no Go goroutines.
 func TestPrefetchStartsNoGoroutines(t *testing.T) {
 	path, _ := makeProxyFile(t, 2_000)
 	before := runtime.NumGoroutine()
@@ -83,6 +82,7 @@ func TestPrefetchStartsNoGoroutines(t *testing.T) {
 	}
 }
 
+// TestPrefetchZeroAllocation checks zero allocations for warmed batch reads with kernel read-ahead and no race instrumentation.
 func TestPrefetchZeroAllocation(t *testing.T) {
 	if raceEnabled {
 		t.Skip("race instrumentation adds allocations to the read path")
@@ -122,8 +122,6 @@ func TestPrefetchZeroAllocation(t *testing.T) {
 }
 
 func collectMixed(pool *proxypool.Pool, limit int, mixed bool) ([]string, error) {
-	// It returns up to limit lines through NextBatch, and through Next after
-	// every third batch when mixed, so that both paths load blocks.
 	var (
 		lines []string
 		batch proxypool.Batch
@@ -153,6 +151,7 @@ func collectMixed(pool *proxypool.Pool, limit int, mixed bool) ([]string, error)
 	return lines, nil
 }
 
+// TestPrefetchNextBatchMatchesWithout checks that kernel read-ahead preserves batched and mixed-read line order.
 func TestPrefetchNextBatchMatchesWithout(t *testing.T) {
 	path, _ := makeProxyFile(t, 3_000)
 	for _, mode := range []proxypool.Mode{proxypool.ModeSequential, proxypool.ModeShuffled} {
@@ -194,8 +193,7 @@ func TestPrefetchNextBatchMatchesWithout(t *testing.T) {
 	}
 }
 
-// A pool with Prefetch may have a read in flight after every NextBatch.
-// Reset, Close, and dropping the pool must each settle it.
+// TestPrefetchReadInFlight checks rewinding, closing, and cleanup with kernel reads in flight.
 func TestPrefetchReadInFlight(t *testing.T) {
 	path, _ := makeProxyFile(t, 3_000)
 	options := proxypool.Options{Mode: proxypool.ModeShuffled, BlockBytes: 4 << 10, RegionBytes: 16 << 10, MaxLineBytes: 128, Seed: 3, Prefetch: true}

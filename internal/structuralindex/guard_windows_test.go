@@ -34,9 +34,6 @@ func guardedPage(t *testing.T) []byte {
 			t.Fatalf("VirtualProtect: %v", err)
 		}
 	}
-	// The region lies outside the Go heap, so holding its address in a
-	// uintptr loses nothing; the indirection keeps vet's unsafeptr check,
-	// meant for heap pointers, from flagging the conversion.
 	middle := base + uintptr(size)
 	return unsafe.Slice((*byte)(*(*unsafe.Pointer)(unsafe.Pointer(&middle))), size)
 }

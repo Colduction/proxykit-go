@@ -10,6 +10,7 @@ import (
 	"github.com/colduction/proxykit-go/proxypool"
 )
 
+// TestOpenRejectsAlignedBufferOverflow checks rejection of alignment padding that exceeds the native integer range.
 func TestOpenRejectsAlignedBufferOverflow(t *testing.T) {
 	if strconv.IntSize != 32 {
 		t.Skip("uint32 offsets limit buffer sizes before int alignment can overflow")
@@ -30,6 +31,7 @@ func TestOpenRejectsAlignedBufferOverflow(t *testing.T) {
 	}
 }
 
+// TestBatchLinesReplacementStopsBeforeNextYield checks that replacing batch storage during iteration panics before yielding another line.
 func TestBatchLinesReplacementStopsBeforeNextYield(t *testing.T) {
 	for _, mode := range []proxypool.Mode{proxypool.ModeSequential, proxypool.ModeShuffled} {
 		for _, ending := range []string{"\n", "\r\n"} {
@@ -81,6 +83,7 @@ func TestBatchLinesReplacementStopsBeforeNextYield(t *testing.T) {
 	}
 }
 
+// TestBatchLinesPanicAtEveryPosition checks that a panic at any iterator position leaves the batch available for replay.
 func TestBatchLinesPanicAtEveryPosition(t *testing.T) {
 	for _, mode := range []proxypool.Mode{proxypool.ModeSequential, proxypool.ModeShuffled} {
 		for _, count := range []int{1, 2, 3, 7} {

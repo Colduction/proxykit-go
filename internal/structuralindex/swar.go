@@ -1,6 +1,6 @@
 package structuralindex
 
-// Word constants for tests on eight bytes at a time.
+// These constants support tests on eight bytes at a time.
 const (
 	// EachByte holds 0x01 in every byte; a multiple of it holds that value
 	// in every byte.
@@ -13,7 +13,7 @@ const (
 
 const maxHostNameLen = 63
 
-// IsHostName reports whether s is a relative DNS host name that needs no
+// IsHostName reports whether the string is a relative DNS host name that needs no
 // further syntax check: 1 to 63 bytes of ASCII letters, digits, hyphens, and
 // dots, in which no label is empty and none begins or ends with a hyphen.
 //
@@ -38,7 +38,7 @@ func IsHostName(s string) bool {
 	return invalid&HighBits == 0
 }
 
-// IsPrintable reports whether every byte of s is printable ASCII,
+// IsPrintable reports whether every byte of the string is printable ASCII,
 // 0x20 to 0x7E. It reports true for the empty string.
 func IsPrintable(s string) bool {
 	n := len(s)
@@ -62,22 +62,22 @@ func invalidNameBytes(w, ends uint64) uint64 {
 }
 
 // UnprintableBytes returns a word that is nonzero under [HighBits] exactly
-// when one of the eight bytes of w is not printable ASCII, 0x20 to 0x7E.
+// when one of the word's eight bytes is not printable ASCII, 0x20 to 0x7E.
 // Words may be combined with OR before the test.
 func UnprintableBytes(w uint64) uint64 {
 	return (w - 0x20*EachByte) | w | (w + EachByte)
 }
 
-// Load64 returns s[i:i+8] as a little-endian word: byte i is the lowest.
-// It panics if s holds fewer than i+8 bytes.
+// Load64 returns eight bytes at the specified offset as a little-endian word.
+// It panics if the offset is negative or fewer than eight bytes remain.
 func Load64(s string, i int) uint64 {
 	b := s[i : i+8]
 	return uint64(b[0]) | uint64(b[1])<<8 | uint64(b[2])<<16 | uint64(b[3])<<24 |
 		uint64(b[4])<<32 | uint64(b[5])<<40 | uint64(b[6])<<48 | uint64(b[7])<<56
 }
 
-// Load32 returns s[i:i+4] as a little-endian value: byte i is the lowest.
-// It panics if s holds fewer than i+4 bytes.
+// Load32 returns four bytes at the specified offset as a little-endian value.
+// It panics if the offset is negative or fewer than four bytes remain.
 func Load32(s string, i int) uint64 {
 	b := s[i : i+4]
 	return uint64(b[0]) | uint64(b[1])<<8 | uint64(b[2])<<16 | uint64(b[3])<<24

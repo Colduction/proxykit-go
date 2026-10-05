@@ -10,6 +10,7 @@ import (
 	"github.com/colduction/proxykit-go/proxypool"
 )
 
+// TestConcurrentLifecycle checks concurrent reads, snapshots, rewinds, and repeated closing.
 func TestConcurrentLifecycle(t *testing.T) {
 	path, _ := makeProxyFile(t, 500)
 	tests := []struct {

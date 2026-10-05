@@ -16,9 +16,6 @@ import (
 )
 
 func collectBatches(pool *proxypool.Pool, limit int) ([]string, error) {
-	// It drains pool through NextBatch with one reused Batch and
-	// returns the lines in emission order, stopping after limit lines when limit
-	// is positive.
 	var (
 		lines []string
 		batch proxypool.Batch
@@ -83,6 +80,7 @@ var batchLayouts = []string{
 	strings.Repeat("line\r\n", 40) + "tail\r",
 }
 
+// TestNextBatchMatchesNext checks batch reads against single-line reads across layouts, block sizes, modes, and reuse cycles.
 func TestNextBatchMatchesNext(t *testing.T) {
 	proxyPath, proxyLines := makeProxyFile(t, 1_000)
 	contents := append(slices.Clone(batchLayouts), strings.Join(proxyLines, "\n")+"\n")
@@ -144,6 +142,7 @@ func TestNextBatchMatchesNext(t *testing.T) {
 	}
 }
 
+// TestNextBatchMatchesNextAcrossShards checks batch order against single-line order for each shard and complete coverage across shards.
 func TestNextBatchMatchesNextAcrossShards(t *testing.T) {
 	const shardCount = 3
 	path, want := makeProxyFile(t, 700)
@@ -186,6 +185,7 @@ func TestNextBatchMatchesNextAcrossShards(t *testing.T) {
 	}
 }
 
+// TestNextBatchMixedCallsExactOnce checks that interleaved batched and single-line reads return each line once.
 func TestNextBatchMixedCallsExactOnce(t *testing.T) {
 	path, want := makeProxyFile(t, 2_000)
 	for _, mode := range []proxypool.Mode{proxypool.ModeSequential, proxypool.ModeShuffled} {
@@ -253,6 +253,7 @@ func TestNextBatchMixedCallsExactOnce(t *testing.T) {
 	}
 }
 
+// TestNextBatchConcurrentExactOnce checks that concurrent batch readers collectively return each line once.
 func TestNextBatchConcurrentExactOnce(t *testing.T) {
 	const workers = 8
 	path, want := makeProxyFile(t, 5_000)
@@ -307,6 +308,7 @@ func TestNextBatchConcurrentExactOnce(t *testing.T) {
 	}
 }
 
+// TestNextBatchZeroAllocation checks zero allocations for warmed pools that reuse batch storage.
 func TestNextBatchZeroAllocation(t *testing.T) {
 	path, _ := makeProxyFile(t, 400)
 	for _, test := range []struct {
@@ -353,6 +355,7 @@ func TestNextBatchZeroAllocation(t *testing.T) {
 	}
 }
 
+// TestNextBatchErrorsLeaveBatchEmpty checks nil batches, exhaustion, terminal errors, rewinds, and closed-pool behavior.
 func TestNextBatchErrorsLeaveBatchEmpty(t *testing.T) {
 	path := writeFile(t, "a\nb\n")
 	pool, err := proxypool.Open(path, proxypool.Options{Mode: proxypool.ModeShuffled, Seed: 1})
@@ -404,6 +407,7 @@ func TestNextBatchErrorsLeaveBatchEmpty(t *testing.T) {
 	}
 }
 
+// TestBatchOutlivesCloseAndReset checks that transferred batch storage survives pool closing and rewinding.
 func TestBatchOutlivesCloseAndReset(t *testing.T) {
 	path, want := makeProxyFile(t, 50)
 	for _, closeFirst := range []bool{true, false} {
@@ -442,6 +446,7 @@ func TestBatchOutlivesCloseAndReset(t *testing.T) {
 	}
 }
 
+// TestBatchStorageFromLargerPoolIsDropped checks storage bounds when a smaller pool receives a larger pool's batch.
 func TestBatchStorageFromLargerPoolIsDropped(t *testing.T) {
 	path, _ := makeProxyFile(t, benchmarkLines)
 	large, err := proxypool.Open(path, proxypool.Options{Mode: proxypool.ModeShuffled, BlockBytes: 256 << 10, Seed: 1})
@@ -468,6 +473,7 @@ func TestBatchStorageFromLargerPoolIsDropped(t *testing.T) {
 	}
 }
 
+// TestStatsCursorCountsBatchLines checks that transferring a batch advances the pool cursor by its full line count.
 func TestStatsCursorCountsBatchLines(t *testing.T) {
 	path, want := makeProxyFile(t, 100)
 	pool, err := proxypool.Open(path, proxypool.Options{})
@@ -496,6 +502,7 @@ func TestStatsCursorCountsBatchLines(t *testing.T) {
 	}
 }
 
+// TestBatchReindexReproducesOffsets checks that rebuilding batch offsets preserves offsets and line order.
 func TestBatchReindexReproducesOffsets(t *testing.T) {
 	path, _ := makeProxyFile(t, 1_000)
 	for _, content := range append(slices.Clone(batchLayouts), "") {
@@ -547,8 +554,7 @@ func TestBatchReindexReproducesOffsets(t *testing.T) {
 	}
 }
 
-// TestBatchNextInlines asserts that the compiler inlines Batch.Next, whose
-// per-line cost is the point of the batch API.
+// TestBatchNextInlines checks that [proxypool.Batch.Next] and [proxypool.Batch.Len] are inlinable.
 func TestBatchNextInlines(t *testing.T) {
 	if testing.Short() {
 		t.Skip("compiles the package")
@@ -566,6 +572,7 @@ func TestBatchNextInlines(t *testing.T) {
 	}
 }
 
+// FuzzNextBatchMatchesNext checks batch line order and errors against single-line reads for varied file layouts.
 func FuzzNextBatchMatchesNext(f *testing.F) {
 	for _, layout := range batchLayouts {
 		f.Add([]byte(layout), uint8(3), uint64(1))
@@ -616,6 +623,7 @@ func drainBatch(batch *proxypool.Batch) int {
 	}
 }
 
+// BenchmarkNextBatch measures batched reads and iteration after pool and batch buffers reach their steady-state capacities.
 func BenchmarkNextBatch(b *testing.B) {
 	path, _ := makeProxyFile(b, benchmarkLines)
 	for _, test := range []struct {
@@ -632,8 +640,6 @@ func BenchmarkNextBatch(b *testing.B) {
 			}
 			defer pool.Close()
 			var batch proxypool.Batch
-			// Two cycles warm the pool and the batch to their block capacities,
-			// so that the loop measures the steady state.
 			for range 8 {
 				if err := pool.NextBatch(&batch); err != nil {
 					b.Fatal(err)
@@ -653,18 +659,11 @@ func BenchmarkNextBatch(b *testing.B) {
 	}
 }
 
-// The iteration benchmarks measure full blocks of the benchmark file at the
-// default block sizes, 1 MiB sequential and 4 MiB shuffled, which is the
-// cache footprint a pool works on right after it reads a block. Shuffled
-// blocks come from four seeds, since the cost of visiting a block in permuted
-// order depends on the permutation step.
 var (
 	defaultSequential = proxypool.Options{}
 	defaultShuffled   = proxypool.Options{Mode: proxypool.ModeShuffled, Seed: 1}
 )
 
-// iterated is a block loaded once, with the permutation position of its
-// first line and its line count.
 type iterated struct {
 	batch *proxypool.Batch
 	name  string
@@ -672,11 +671,8 @@ type iterated struct {
 	lines int
 }
 
-// BenchmarkBatchIterate measures the cost the pool adds per line once a block
-// is in memory: indexing the block and iterating its lines, through
-// Batch.Lines and through Batch.Next, with the first byte of every line read.
-// It is the measure of the ten-fold goal against BenchmarkNextBytes before the
-// block engine.
+// BenchmarkBatchIterate measures indexing and iteration through [proxypool.Batch.Lines] and [proxypool.Batch.Next], reading the first byte of each line.
+// It uses resident blocks at the default sequential and shuffled sizes, with four seeds for shuffled permutations.
 func BenchmarkBatchIterate(b *testing.B) {
 	path, _ := makeProxyFile(b, benchmarkLines)
 	crlfPath := writeFile(b, strings.ReplaceAll(readFile(b, path), "\n", "\r\n"))
@@ -714,7 +710,8 @@ func drainLines(batch *proxypool.Batch) int {
 	return total
 }
 
-// BenchmarkBatchLines measures iteration alone through Batch.Lines.
+// BenchmarkBatchLines measures resident-block iteration through [proxypool.Batch.Lines] and [proxypool.Batch.Next] without indexing or reads.
+// It uses the default block sizes and four seeds for shuffled permutations.
 func BenchmarkBatchLines(b *testing.B) {
 	path, _ := makeProxyFile(b, benchmarkLines)
 	for _, mode := range []string{"sequential", "shuffled"} {
@@ -738,8 +735,6 @@ func BenchmarkBatchLines(b *testing.B) {
 }
 
 func loadBlocks(b *testing.B, path, mode string) []iterated {
-	// It returns the largest block of path at the default options of
-	// mode, or of four seeds in shuffled mode.
 	b.Helper()
 	seeds := []uint64{0}
 	options := defaultSequential
@@ -790,8 +785,7 @@ func readFile(tb testing.TB, path string) string {
 	return string(content)
 }
 
-// BenchmarkReadAtFloor measures the kernel copy of the whole file through the
-// same handle flags the pool uses, which no user-space change can beat.
+// BenchmarkReadAtFloor measures full-file kernel copies with the handle flags and block sizes used by pools.
 func BenchmarkReadAtFloor(b *testing.B) {
 	path, _ := makeProxyFile(b, benchmarkLines)
 	info, err := os.Stat(path)
@@ -829,6 +823,7 @@ func BenchmarkReadAtFloor(b *testing.B) {
 	}
 }
 
+// BenchmarkReadCycleBatch measures opening, reading, and closing full source cycles through batch iteration.
 func BenchmarkReadCycleBatch(b *testing.B) {
 	path, _ := makeProxyFile(b, benchmarkLines)
 	info, err := os.Stat(path)
@@ -874,9 +869,7 @@ func BenchmarkReadCycleBatch(b *testing.B) {
 	}
 }
 
-// The views of Lines assume that the batch keeps its storage while the loop
-// runs, so passing the batch to NextBatch in the body must panic, on the
-// linear path of sequential pools and the permuted path of shuffled ones.
+// TestBatchLinesPanicsOnNextBatchInBody checks that [proxypool.Batch.Lines] panics when its loop body replaces the batch storage.
 func TestBatchLinesPanicsOnNextBatchInBody(t *testing.T) {
 	path, _ := makeProxyFile(t, 2_000)
 	for _, mode := range []proxypool.Mode{proxypool.ModeSequential, proxypool.ModeShuffled} {
@@ -902,8 +895,7 @@ func TestBatchLinesPanicsOnNextBatchInBody(t *testing.T) {
 	}
 }
 
-// A body that panics leaves the batch where the loop began, so a later loop
-// yields the same lines again.
+// TestBatchLinesPanicKeepsPosition checks that a panic during iteration preserves the position for replay.
 func TestBatchLinesPanicKeepsPosition(t *testing.T) {
 	path, _ := makeProxyFile(t, 500)
 	for _, mode := range []proxypool.Mode{proxypool.ModeSequential, proxypool.ModeShuffled} {

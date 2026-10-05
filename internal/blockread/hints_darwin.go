@@ -9,9 +9,10 @@ import (
 	"unsafe"
 )
 
-// Hints asks the kernel to read ranges of a file into its cache in the
-// background, with POSIX_FADV_WILLNEED on Linux and F_RDADVISE on macOS.
-// Open prepares it for a file.
+// Hints asks the kernel to read file ranges into its cache in the background.
+// [Hints.Open] must succeed before [Hints.Advise] is called.
+// Each request keeps the file descriptor valid while submitting advice;
+// the caller keeps the file open for the lifetime of the hints.
 type Hints struct {
 	raw    syscall.RawConn
 	advise func(fd uintptr)
@@ -20,16 +21,12 @@ type Hints struct {
 	err    error
 }
 
-// Open prepares hints for file, which must stay open while hints is in use,
-// and reports whether the platform takes hints.
+// Open binds the hints to an open file and reports whether advice can be submitted.
 func (hints *Hints) Open(file *os.File) bool {
 	raw, err := file.SyscallConn()
 	if err != nil {
 		return false
 	}
-	// The callback is built once so that each hint allocates nothing, and
-	// RawConn.Control keeps the descriptor valid while it runs. F_RDADVISE
-	// starts an asynchronous read of the range into the unified buffer cache.
 	hints.raw = raw
 	hints.advise = func(fd uintptr) {
 		advisory := syscall.Radvisory_t{
@@ -44,8 +41,8 @@ func (hints *Hints) Open(file *os.File) bool {
 	return true
 }
 
-// Advise asks the kernel to read length bytes at offset in the background
-// and reports whether it took the hint.
+// Advise asks the kernel to read a byte range in the background and reports
+// whether the advice call succeeded. The requested length is limited to [math.MaxInt32].
 func (hints *Hints) Advise(offset int64, length int) bool {
 	hints.offset, hints.length, hints.err = offset, length, nil
 	if err := hints.raw.Control(hints.advise); err != nil {

@@ -12,11 +12,9 @@ import (
 	"github.com/colduction/proxykit-go/proxypool"
 )
 
-// BenchmarkLargeFile reads a generated file of PROXYKIT_BENCH_LARGE_GIB GiB
-// from start to end, through NextBytes and through NextBatch, and reports the
-// throughput. It is skipped unless the variable is set; the file comes from
-// the page cache after it is written, so the figures are the pool's throughput
-// over a warm cache, which bounds its throughput over any storage.
+// BenchmarkLargeFile measures full-file throughput through [proxypool.Pool.NextBytes] and [proxypool.Pool.NextBatch].
+// The PROXYKIT_BENCH_LARGE_GIB environment variable sets the source size in GiB; the benchmark is skipped when it is unset or nonpositive.
+// The source is written immediately before measurement, so results depend on available page-cache capacity.
 func BenchmarkLargeFile(b *testing.B) {
 	gib, _ := strconv.Atoi(os.Getenv("PROXYKIT_BENCH_LARGE_GIB"))
 	if gib <= 0 {

@@ -21,6 +21,7 @@ import (
 	"github.com/colduction/proxykit-go/proxypool"
 )
 
+// TestPoolParseHTTPProxy checks pooled parsing and authenticated requests through HTTP and HTTPS proxies.
 func TestPoolParseHTTPProxy(t *testing.T) {
 	const (
 		username = "user@name"
@@ -128,6 +129,7 @@ func TestPoolParseHTTPProxy(t *testing.T) {
 	}
 }
 
+// BenchmarkPoolParse measures sequential and shuffled pool iteration with proxy parsing.
 func BenchmarkPoolParse(b *testing.B) {
 	const lineCount = 4096
 	var source strings.Builder

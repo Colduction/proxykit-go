@@ -27,7 +27,7 @@ var (
 	ErrHostNotParsed = errors.New("proxyparser: could not parse host")
 	// ErrSchemeNotParsed is returned when lenient parsing produces no scheme.
 	ErrSchemeNotParsed = errors.New("proxyparser: could not parse scheme")
-	// ErrNilProxy is returned by [Parser.ParseInto] when dst is nil.
+	// ErrNilProxy is returned by [Parser.ParseInto] when the destination is nil.
 	ErrNilProxy = errors.New("proxyparser: nil proxy destination")
 )
 
@@ -87,8 +87,6 @@ const (
 	schemeSeparatorClass = structuralindex.Class(0xfe)
 )
 
-// parseOp stores pointer-free offsets into Parse.format. A zero field
-// marks a delimiter state; any other field marks a capture state.
 type parseOp struct {
 	delimiterStart   uint32
 	delimiterLength  uint32
@@ -102,27 +100,27 @@ type parseOp struct {
 // Parser parses proxy strings according to a format compiled by [New].
 // A [Parser] is safe for concurrent use by multiple goroutines.
 type Parser interface {
-	// Parse parses input and returns a newly allocated [proxykit.Proxy].
+	// Parse parses the input and returns a newly allocated [proxykit.Proxy].
 	Parse(input string) (*proxykit.Proxy, error)
 
-	// ParseString parses input and returns a stack-friendly [proxykit.Proxy].
+	// ParseString parses the input and returns a [proxykit.Proxy] by value.
 	ParseString(input string) (proxykit.Proxy, error)
 
-	// ParseInto resets dst and parses input into it.
+	// ParseInto resets the destination and parses the input into it.
 	// Successful parsing does not allocate for standard proxy formats.
-	// Callers must not access dst during the call. Concurrent calls must use
-	// distinct destinations. When ParseInto returns a non-nil error the
-	// contents of dst are unspecified.
+	// Callers must not access the destination during the call. Concurrent calls must use
+	// distinct destinations. When [Parser.ParseInto] returns a non-nil error the
+	// destination's contents are unspecified. Parsed fields may share the input's bytes.
 	ParseInto(input string, dst *proxykit.Proxy) error
 
-	// ParseBytes parses input into dst without converting input to an
+	// ParseBytes parses the input into the destination without converting the input to an
 	// allocated string.
 	//
-	// Parsed string fields may alias input. A scheme canonicalized by
+	// Parsed string fields may alias the input. A scheme canonicalized by
 	// [proxykit.ParseScheme] is a constant, and joining nonadjacent host and port
 	// fields allocates a separate string. Concurrent calls must use distinct
-	// destinations, and callers must keep input immutable while any parsed dst is
-	// in use. When ParseBytes returns a non-nil error the contents of dst are
+	// destinations, and callers must keep the input immutable while a parsed destination is
+	// in use. When [Parser.ParseBytes] returns a non-nil error the destination's contents are
 	// unspecified.
 	ParseBytes(input []byte, dst *proxykit.Proxy) error
 }
@@ -136,14 +134,14 @@ type Parse struct {
 	kind              parserKind
 }
 
-// New compiles format and returns a [*Parse].
+// New compiles the format and returns a [*Parse].
 //
 // Format accepts %t for scheme, %h for host, %d for port, %u for username,
 // %p for password, and %% for a literal percent sign.
 // A bracketed IPv6 host is captured through its closing bracket before
 // searching for the next delimiter.
 //
-// In strict mode, input must match format exactly, and each host and port
+// In strict mode, the input must match the format exactly, and each host and port
 // capture must be nonempty.
 // In lenient mode, credentials may be absent, and a %u:%p@ group also accepts
 // username@ with an empty password. Delimiter mismatches and trailing input
@@ -238,7 +236,7 @@ func New(format string, strict bool) (*Parse, error) {
 	}, nil
 }
 
-// Parse implements [Parser.Parse].
+// Parse implements [Parser.Parse]. A nil receiver returns a nil proxy and error.
 func (pp *Parse) Parse(input string) (*proxykit.Proxy, error) {
 	if pp == nil {
 		return nil, nil
@@ -250,7 +248,7 @@ func (pp *Parse) Parse(input string) (*proxykit.Proxy, error) {
 	return new(parsed), nil
 }
 
-// ParseString implements [Parser.ParseString].
+// ParseString implements [Parser.ParseString]. A nil receiver returns a zero proxy and nil error.
 func (pp *Parse) ParseString(input string) (proxy proxykit.Proxy, err error) {
 	if pp != nil {
 		err = pp.parseInto(input, &proxy, true)
@@ -258,12 +256,13 @@ func (pp *Parse) ParseString(input string) (proxy proxykit.Proxy, err error) {
 	return proxy, err
 }
 
-// ParseBytes implements [Parser.ParseBytes].
+// ParseBytes implements [Parser.ParseBytes] with the nil behavior of [Parse.ParseInto].
 func (pp *Parse) ParseBytes(input []byte, proxy *proxykit.Proxy) error {
 	return pp.ParseInto(unsafe.String(unsafe.SliceData(input), len(input)), proxy)
 }
 
-// ParseInto implements [Parser.ParseInto].
+// ParseInto implements [Parser.ParseInto]. A nil receiver leaves the destination unchanged
+// and returns nil. Otherwise a nil destination returns [ErrNilProxy].
 func (pp *Parse) ParseInto(input string, proxy *proxykit.Proxy) error {
 	if pp == nil {
 		return nil
@@ -275,9 +274,6 @@ func (pp *Parse) ParseInto(input string, proxy *proxykit.Proxy) error {
 }
 
 func (pp *Parse) parseInto(input string, proxy *proxykit.Proxy, fast bool) error {
-	// The fast paths handle input they prove valid and leave everything else,
-	// including every validation error, to the scalar code below. fast is
-	// false only in tests, which compare the two.
 	switch pp.kind {
 	case parserStrictSchemeHostPort:
 		if fast {
@@ -299,8 +295,6 @@ func (pp *Parse) parseInto(input string, proxy *proxykit.Proxy, fast bool) error
 		return err
 	}
 	proxy.Reset()
-	// With an index, the bytes it classifies are found in its bitmaps; every
-	// lookup returns what the strings search it replaces would return.
 	var ix structuralindex.Index
 	indexed := fast && ix.Build(input)
 	var (
@@ -386,8 +380,6 @@ func (pp *Parse) parseInto(input string, proxy *proxykit.Proxy, fast bool) error
 		if credentialAt >= 0 && op.field == 'u' && op.delimiterByte == ':' &&
 			op.credentialEnd == uint32(i+3) && plan[i+2].field == 'p' && idx > credentialAt &&
 			indexByteFrom(&ix, indexed, input, start+idx+1, '@', structuralindex.At) < 0 {
-			// A colon after the only at sign belongs to the endpoint. Keep
-			// usernames containing at signs when a password separator exists.
 			proxy.Username, proxy.Password = input[start:start+credentialAt], ""
 			inputPos = start + credentialAt + 1
 			i = int(op.credentialEnd)
@@ -571,10 +563,6 @@ func assignField(proxy *proxykit.Proxy, field byte, val string) {
 	}
 }
 
-// schemeOf canonicalizes s with [proxykit.ParseScheme]. When s is not a
-// supported scheme it returns the raw value, so that validation reports it,
-// and false. Callers test the canonical form inline first and call schemeOf
-// only for other input.
 func schemeOf(s string) (proxykit.ProxyScheme, bool) {
 	if scheme, ok := proxykit.ParseScheme(s); ok {
 		return scheme, true
@@ -582,8 +570,6 @@ func schemeOf(s string) (proxykit.ProxyScheme, bool) {
 	return proxykit.ProxyScheme(s), false
 }
 
-// Pre-wrapped [ErrInvalidProxyFormat] errors, one per [proxykit.Proxy.Validate]
-// sentinel, so that wrapping adds no allocation of its own.
 var (
 	errInvalidScheme      = fmt.Errorf("%w: %w", ErrInvalidProxyFormat, proxykit.ErrInvalidScheme)
 	errInvalidHost        = fmt.Errorf("%w: %w", ErrInvalidProxyFormat, proxykit.ErrInvalidHost)
@@ -591,9 +577,6 @@ var (
 	errInvalidCredentials = fmt.Errorf("%w: %w", ErrInvalidProxyFormat, proxykit.ErrInvalidCredentials)
 )
 
-// invalidProxyFormat returns the [ErrInvalidProxyFormat] error that wraps err,
-// a [proxykit.Proxy.Validate] sentinel, so that callers can match either with
-// errors.Is. It does not allocate.
 func invalidProxyFormat(err error) error {
 	switch err {
 	case proxykit.ErrInvalidScheme:

@@ -12,13 +12,6 @@ import (
 	"github.com/colduction/proxykit-go/internal/fileopen"
 )
 
-// A Reader on Windows calls ReadFile on a synchronous handle with the file
-// offset in an OVERLAPPED structure, instead of os.File.ReadAt on an
-// overlapped handle, whose reads complete through the runtime's I/O
-// completion port. On an uncached file, reads of 1 MiB and 4 MiB this way
-// measured 1.5 to 1.7 times the throughput of ReadAt, since the cache manager
-// reads ahead of a synchronous reader, and slightly more on a cached one.
-
 const (
 	errorHandleEOF = syscall.Errno(38)
 	errorIOPending = syscall.Errno(997)
@@ -61,15 +54,16 @@ var (
 	forceDirect bool
 )
 
-// A Reader performs positional reads of one file. Init binds it to the file.
+// A Reader performs positional reads of one file through a synchronous handle.
+// Initialize it with [Reader.Init] before use.
 type Reader struct {
 	overlapped syscall.Overlapped
 	handle     syscall.Handle
 	done       uint32
 }
 
-// OpenSource opens name for reading with a [Reader], with the platform's
-// hint of sequential reading when sequential is true.
+// OpenSource opens the named file for reading with a [Reader].
+// The sequential option requests the platform's sequential-access hint.
 func OpenSource(name string, sequential bool) (*os.File, error) {
 	flag := os.O_RDONLY
 	if sequential {
@@ -78,20 +72,17 @@ func OpenSource(name string, sequential bool) (*os.File, error) {
 	return os.OpenFile(name, flag, 0)
 }
 
-// Init binds reader to file, which must stay open while reader is in use.
+// Init binds the reader to an open file, which must remain open while the reader is in use.
 func (reader *Reader) Init(file *os.File) {
-	// File.Fd would also detach the handle from the runtime's completion
-	// port, which a synchronous handle never joins.
 	_ = fileopen.WithFD(file, func(fd uintptr) error {
 		reader.handle = syscall.Handle(fd)
 		return nil
 	})
 }
 
-// ReadAt reads len(p) bytes at offset as [os.File.ReadAt] does.
+// ReadAt reads into the buffer at the byte offset as [os.File.ReadAt] does.
+// Negative offsets return an error, and short reads return [io.EOF].
 func (reader *Reader) ReadAt(p []byte, offset int64) (int, error) {
-	// Windows interprets offset -2 as the current file position rather than
-	// rejecting it. Positional reads never accept a negative offset.
 	if offset < 0 {
 		return 0, &os.PathError{Op: "readat", Path: "block source", Err: errors.New("negative offset")}
 	}
@@ -100,16 +91,12 @@ func (reader *Reader) ReadAt(p []byte, offset int64) (int, error) {
 	return readResult(int(reader.done), len(p), err)
 }
 
-// OpenAhead returns an [Ahead] for the file of reader, or nil where the
-// platform offers none, which is every platform but Windows. The Ahead reads
-// without buffering when direct is true, the caller's reads suit that, and the
-// file is larger than the memory available to cache it; sequential passes the
-// hint of sequential reading to a buffered one. The caller closes it.
+// OpenAhead returns an [Ahead] for the reader's file, or nil if its resources
+// cannot be opened. The caller must call [Ahead.Close] to release them.
+// The direct option bypasses the system cache when the file supports aligned
+// reads and its size exceeds available physical memory.
+// The sequential option requests a sequential-access hint for buffered reads.
 func (reader *Reader) OpenAhead(size int64, sequential, direct bool) *Ahead {
-	// ReOpenFile opens the same file again for overlapped reads, which the
-	// runtime's completion port never sees. Each read signals a manual-reset
-	// event; setting its low bit in the OVERLAPPED structure keeps the
-	// completion off any completion port as well.
 	direct = direct && reader.directReadable(size)
 	flags := uintptr(syscall.FILE_FLAG_OVERLAPPED)
 	switch {
@@ -123,7 +110,6 @@ func (reader *Reader) OpenAhead(size int64, sequential, direct bool) *Ahead {
 	if syscall.Handle(handle) == syscall.InvalidHandle {
 		return nil
 	}
-	// The events signal completion, so the handle need not be signaled too.
 	_ = syscall.SetFileCompletionNotificationModes(syscall.Handle(handle), fileSkipSetEventOnHandle)
 	ahead := &Ahead{handle: syscall.Handle(handle), direct: direct}
 	for i := range ahead.requests {
@@ -138,11 +124,6 @@ func (reader *Reader) OpenAhead(size int64, sequential, direct bool) *Ahead {
 }
 
 func (reader *Reader) directReadable(size int64) bool {
-	// It reports whether the file suits reads without buffering: the cache
-	// could not hold it, and the file system takes sector-aligned reads of
-	// it. memoryStatus, basicInformation, and storageInformation have the
-	// layouts of MEMORYSTATUSEX, FILE_BASIC_INFO, and FILE_STORAGE_INFO,
-	// whose fields give them the alignment the calls require.
 	if !forceDirect {
 		memory := memoryStatus{length: uint32(unsafe.Sizeof(memoryStatus{}))}
 		if ok, _, _ := syscall.SyscallN(procGlobalMemoryStatus.Addr(), uintptr(unsafe.Pointer(&memory))); ok == 0 ||
@@ -172,9 +153,10 @@ func validSector(bytes uint32) bool {
 	return bytes != 0 && bytes <= PageBytes && bytes&(bytes-1) == 0
 }
 
-// SetForceDirect makes [Reader.OpenAhead] read without buffering whatever
-// the size of the file, when the caller asks for it, and returns the
-// previous setting. Tests use it.
+// SetForceDirect sets whether [Reader.OpenAhead] bypasses the file-size
+// threshold for requested direct reads and returns the prior setting.
+// It does not bypass the file's alignment and attribute requirements.
+// Calls must be serialized with each other and with [Reader.OpenAhead].
 func SetForceDirect(on bool) bool {
 	previous := forceDirect
 	forceDirect = on
@@ -182,8 +164,6 @@ func SetForceDirect(on bool) bool {
 }
 
 func readResult(read, length int, err error) (int, error) {
-	// It reports a read the way ReadAt does: a count short of length ends
-	// at the end of the file.
 	switch {
 	case err == errorHandleEOF:
 		return read, io.EOF

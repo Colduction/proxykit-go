@@ -28,9 +28,8 @@ func source(line string) []byte {
 	return bytes.Repeat([]byte(line), sourceBytes/len(line))
 }
 
+// BenchmarkEnds measures [lineindex.Ends] and [bytes.IndexByte] scanning for proxy lines and extreme line-feed densities.
 func BenchmarkEnds(b *testing.B) {
-	// Each shape is a 64 KiB source of proxy lines of one length, or one of
-	// the extremes: nothing but line feeds, or none.
 	for _, backend := range backends(b) {
 		for _, shape := range shapes {
 			b.Run(fmt.Sprintf("%v/%s", backend, shape.name), func(b *testing.B) {
@@ -49,8 +48,6 @@ func BenchmarkEnds(b *testing.B) {
 			})
 		}
 	}
-	// The reference is the loop that proxypool ran before, one IndexByte
-	// call per line, which the portable tier must beat.
 	for _, shape := range shapes {
 		b.Run("indexbyte/"+shape.name, func(b *testing.B) {
 			src := source(shape.line)
@@ -74,6 +71,7 @@ func BenchmarkEnds(b *testing.B) {
 	}
 }
 
+// BenchmarkMaxGap measures [lineindex.MaxGap] across backend choices and offset counts.
 func BenchmarkMaxGap(b *testing.B) {
 	for _, backend := range backends(b) {
 		for _, n := range []int{64, 1 << 10, 64 << 10} {

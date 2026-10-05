@@ -9,7 +9,8 @@ import (
 	"github.com/colduction/proxykit-go/internal/fileopen"
 )
 
-// TestHintsRangeBoundaries checks invalid ranges and final chunks near MaxInt64.
+// TestHintsRangeBoundaries checks [blockread.Hints.Advise] with invalid ranges
+// and final chunks near [math.MaxInt64].
 func TestHintsRangeBoundaries(t *testing.T) {
 	if bits.UintSize == 32 {
 		t.Skip("file hints are unavailable on 32-bit Linux")

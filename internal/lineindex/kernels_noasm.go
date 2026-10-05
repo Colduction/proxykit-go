@@ -3,7 +3,6 @@
 package lineindex
 
 func vectorized() bool {
-	// It reports whether the active backend has a vector kernel.
 	return false
 }
 

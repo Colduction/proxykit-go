@@ -9,7 +9,7 @@ import (
 	"github.com/colduction/proxykit-go/proxypool"
 )
 
-// TestOpenFileInvalidModePreservesSource checks that mode validation precedes truncation.
+// TestOpenFileInvalidModePreservesSource checks that iteration-mode validation precedes truncation.
 func TestOpenFileInvalidModePreservesSource(t *testing.T) {
 	const content = "source must survive\n"
 	path := writeFile(t, content)
@@ -25,7 +25,7 @@ func TestOpenFileInvalidModePreservesSource(t *testing.T) {
 	}
 }
 
-// TestOpenFileInvalidModeDoesNotCreateSource checks that mode validation precedes file creation.
+// TestOpenFileInvalidModeDoesNotCreateSource checks that iteration-mode validation precedes file creation.
 func TestOpenFileInvalidModeDoesNotCreateSource(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "proxies.txt")
 	file, err := proxypool.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0o600, proxypool.Mode(255))

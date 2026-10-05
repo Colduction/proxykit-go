@@ -12,8 +12,6 @@ import (
 )
 
 func backends(t testing.TB) []structuralindex.Backend {
-	// It returns every backend this machine runs, Portable first, and
-	// restores the active one when the test ends.
 	t.Helper()
 	initial := structuralindex.ActiveBackend()
 	t.Cleanup(func() { structuralindex.SetBackend(initial) })
@@ -29,7 +27,6 @@ func backends(t testing.TB) []structuralindex.Backend {
 }
 
 func endsByteWise(src []byte, base uint32) []uint32 {
-	// It is the oracle: the line ends of src, one byte at a time.
 	var ends []uint32
 	for i, b := range src {
 		if b == '\n' {
@@ -40,9 +37,6 @@ func endsByteWise(src []byte, base uint32) []uint32 {
 }
 
 func checkCarriageReturn(t testing.TB, backend structuralindex.Backend, examined []byte, cr bool) {
-	// It checks the cr hint of Ends for the examined bytes: it
-	// must be true when a line feed follows a carriage return, which puts the line
-	// feed after src[0], and false when there is no carriage return.
 	t.Helper()
 	switch {
 	case bytes.Contains(examined, []byte("\r\n")) && !cr:
@@ -53,9 +47,6 @@ func checkCarriageReturn(t testing.TB, backend structuralindex.Backend, examined
 }
 
 func checkEnds(t testing.TB, backend structuralindex.Backend, src []byte, base uint32, room int) {
-	// It runs Ends on src with room elements of dst, checks the result
-	// against the oracle and the room contract, and resumes with growing room
-	// until src is consumed.
 	t.Helper()
 	want := endsByteWise(src, base)
 	dst := make([]uint32, room)
@@ -64,7 +55,6 @@ func checkEnds(t testing.TB, backend structuralindex.Backend, src []byte, base u
 		position int
 	)
 	for position < len(src) {
-		// Poison the slots so that a missing store shows.
 		for i := range dst {
 			dst[i] = 0xdeadbeef
 		}
@@ -95,12 +85,11 @@ func checkEnds(t testing.TB, backend structuralindex.Backend, src []byte, base u
 	}
 }
 
+// TestEndsEveryByteAtEveryPosition checks [lineindex.Ends] across byte values, source alignments, and lengths.
 func TestEndsEveryByteAtEveryPosition(t *testing.T) {
 	values := []byte("\n\r\x00\x0b\x0c\x8a\x8d\xff a")
 	for _, backend := range backends(t) {
 		structuralindex.SetBackend(backend)
-		// The storage offset changes the alignment of src, and the
-		// neighbours hold line feeds that must not leak into the result.
 		storage := bytes.Repeat([]byte("ab\ncd\r\nef"), 40)
 		for n := 0; n <= 200; n++ {
 			sweep := values
@@ -128,6 +117,7 @@ func TestEndsEveryByteAtEveryPosition(t *testing.T) {
 	}
 }
 
+// TestEndsLineFeedDensities checks [lineindex.Ends] across line-feed counts and placements.
 func TestEndsLineFeedDensities(t *testing.T) {
 	random := rand.New(rand.NewPCG(3, 4))
 	for _, backend := range backends(t) {
@@ -137,8 +127,6 @@ func TestEndsLineFeedDensities(t *testing.T) {
 				for count := 0; count <= 64; count++ {
 					src := bytes.Repeat([]byte{'x'}, blocks*64+tail)
 					for block := range blocks {
-						// First, last, and random placements of count line
-						// feeds within the block.
 						switch count % 3 {
 						case 0:
 							for i := range count {
@@ -162,6 +150,7 @@ func TestEndsLineFeedDensities(t *testing.T) {
 	}
 }
 
+// TestEndsRoomContract checks [lineindex.Ends] progress and resumption with limited destination space.
 func TestEndsRoomContract(t *testing.T) {
 	for _, backend := range backends(t) {
 		structuralindex.SetBackend(backend)
@@ -182,6 +171,7 @@ func TestEndsRoomContract(t *testing.T) {
 	}
 }
 
+// TestEndsCarriageReturnEveryPosition checks the carriage-return hint of [lineindex.Ends] at each source position.
 func TestEndsCarriageReturnEveryPosition(t *testing.T) {
 	for _, backend := range backends(t) {
 		structuralindex.SetBackend(backend)
@@ -198,6 +188,7 @@ func TestEndsCarriageReturnEveryPosition(t *testing.T) {
 	}
 }
 
+// TestEndsBase checks base offsets of [lineindex.Ends] through the unsigned 32-bit limit.
 func TestEndsBase(t *testing.T) {
 	src := bytes.Repeat([]byte("line\n"), 60)
 	for _, backend := range backends(t) {
@@ -208,9 +199,8 @@ func TestEndsBase(t *testing.T) {
 	}
 }
 
-// TestEndsBesideProtectedPages places src against both edges of a page whose
-// neighbours fault on access, and dst against the end of such a page, so a
-// kernel that reads or writes outside them crashes the test.
+// TestEndsBesideProtectedPages checks [lineindex.Ends] near protected memory pages
+// so reads or writes outside its arguments fault.
 func TestEndsBesideProtectedPages(t *testing.T) {
 	page := guardedPage(t)
 	dstPage := guardedPage(t)
@@ -246,6 +236,7 @@ func TestEndsBesideProtectedPages(t *testing.T) {
 	}
 }
 
+// TestMaxGap checks [lineindex.MaxGap] across lengths, lane positions, and unsigned 32-bit limits.
 func TestMaxGap(t *testing.T) {
 	random := rand.New(rand.NewPCG(5, 6))
 	for _, backend := range backends(t) {
@@ -267,7 +258,6 @@ func TestMaxGap(t *testing.T) {
 				}
 			}
 		}
-		// A gap in every lane position, and gaps near the uint32 limit.
 		for n := 2; n <= 40; n++ {
 			for at := 1; at < n; at++ {
 				offsets := make([]uint32, n)
@@ -285,6 +275,7 @@ func TestMaxGap(t *testing.T) {
 	}
 }
 
+// FuzzEnds compares [lineindex.Ends] with byte-wise results across sources, capacities, and base offsets.
 func FuzzEnds(f *testing.F) {
 	f.Add([]byte("http://user:pass@proxy.example:8080\nsocks5://a:b@c:1\r\n"), uint8(64), uint32(0))
 	f.Add(bytes.Repeat([]byte("\n"), 130), uint8(3), uint32(7))
@@ -300,6 +291,7 @@ func FuzzEnds(f *testing.F) {
 	})
 }
 
+// FuzzMaxGap compares [lineindex.MaxGap] with scalar results across offset sequences.
 func FuzzMaxGap(f *testing.F) {
 	f.Add([]byte{1, 2, 3, 4, 5, 6, 7, 8, 9})
 	available := backends(f)

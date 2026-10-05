@@ -16,8 +16,6 @@ const (
 )
 
 func availableBackends() []structuralindex.Backend {
-	// SetBackend ignores a backend the processor lacks, so probing each one
-	// yields the set this machine runs.
 	previous := structuralindex.ActiveBackend()
 	defer structuralindex.SetBackend(previous)
 	var backends []structuralindex.Backend
@@ -31,8 +29,6 @@ func availableBackends() []structuralindex.Backend {
 }
 
 func diffEntryPoints(parser *proxyparser.Parse, input string) string {
-	// The result describes the first entry point whose result differs from
-	// the scalar parser, and is empty when none does.
 	sentinel := proxykit.Proxy{Scheme: "x", Host: "x", Username: "x", Password: "x"}
 	want := sentinel
 	wantErr := parser.ParseIntoScalar(input, &want)
@@ -47,8 +43,6 @@ func diffEntryPoints(parser *proxyparser.Parse, input string) string {
 		return fmt.Sprintf("ParseString(%q) = %+v, %v; scalar %+v, %v", input, value, err, want, wantErr)
 	}
 	got = sentinel
-	// The copy has exact capacity, so a read past the end of the input is
-	// more likely to reach memory that the checker or a guard notices.
 	raw := make([]byte, len(input))
 	copy(raw, input)
 	gotErr = parser.ParseBytes(raw, &got)
@@ -92,6 +86,7 @@ func enumerate(alphabet string, maxLen int, visit func(s string)) {
 	}
 }
 
+// TestSoundnessHostPortExhaustive compares endpoint parsing with scalar parsing over a short alphabet.
 func TestSoundnessHostPortExhaustive(t *testing.T) {
 	maxLen := 8
 	if testing.Short() {
@@ -124,9 +119,8 @@ func TestSoundnessHostPortExhaustive(t *testing.T) {
 	})
 }
 
+// TestSoundnessHostPortPositions checks parser parity at host-port byte positions and input lengths.
 func TestSoundnessHostPortPositions(t *testing.T) {
-	// Every short pattern slides across every offset of a 64-byte text, so
-	// label edges land on each word boundary and on positions 62 and 63.
 	var patterns []string
 	enumerate("aZ9-.:", 5, func(s string) { patterns = append(patterns, s) })
 	full := mustNew(t, formatFullCredentials, true)
@@ -176,6 +170,7 @@ func TestSoundnessHostPortPositions(t *testing.T) {
 	})
 }
 
+// TestSoundnessEveryByteEveryPosition checks parser parity for every byte value at each input position.
 func TestSoundnessEveryByteEveryPosition(t *testing.T) {
 	bases := []string{
 		"http://proxy.example.com:8080",
@@ -248,6 +243,7 @@ func soundnessSeeds() []string {
 	return seeds
 }
 
+// TestSoundnessSeeds checks representative parsing boundaries across supported backends.
 func TestSoundnessSeeds(t *testing.T) {
 	parsers := []*proxyparser.Parse{mustNew(t, formatSchemeHostPort, true), mustNew(t, formatFullCredentials, true)}
 	forEachBackend(t, func(t *testing.T) {
@@ -279,17 +275,18 @@ func fuzzFormat(f *testing.F, format string) {
 	})
 }
 
+// FuzzSoundnessSchemeHostPort compares endpoint parsing with scalar results and errors.
 func FuzzSoundnessSchemeHostPort(f *testing.F) {
 	fuzzFormat(f, formatSchemeHostPort)
 }
 
+// FuzzSoundnessFullCredentials compares credential parsing with scalar results and errors.
 func FuzzSoundnessFullCredentials(f *testing.F) {
 	fuzzFormat(f, formatFullCredentials)
 }
 
+// FuzzSoundnessAssembled checks scalar parity for assembled schemes, credentials, hosts, and ports.
 func FuzzSoundnessAssembled(f *testing.F) {
-	// Assembling the input from parts keeps the fuzzer near the accepted
-	// language, where a wrong acceptance would hide.
 	f.Add(uint8(0), "user", "pass", "proxy.example.com", "8080")
 	f.Add(uint8(3), "user", "", "10.0.0.1", "1080")
 	f.Add(uint8(5), "", "", "a-b.c", "00001")

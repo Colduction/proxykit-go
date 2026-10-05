@@ -7,9 +7,10 @@ import (
 	"unsafe"
 )
 
-// Fadvise gives the kernel access-pattern advice for fd over the byte range
-// starting at offset and extending for length bytes. It returns
-// [syscall.ENOSYS] on 32-bit Linux platforms.
+// Fadvise gives the kernel access-pattern advice for a file descriptor over
+// the requested byte offset and length. The advice value selects the kernel's
+// access policy. A zero length covers the remainder of the file.
+// It returns [syscall.ENOSYS] on 32-bit Linux platforms.
 func Fadvise(fd int, offset int64, length int64, advice int) error {
 	if unsafe.Sizeof(uintptr(0)) == 4 {
 		return syscall.ENOSYS

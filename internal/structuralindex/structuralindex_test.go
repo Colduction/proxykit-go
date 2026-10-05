@@ -1,3 +1,4 @@
+// Package structuralindex_test checks byte classification and bitmap queries.
 package structuralindex_test
 
 import (
@@ -23,8 +24,6 @@ var classes = []struct {
 }
 
 func vectorBackends(t testing.TB) []structuralindex.Backend {
-	// SetBackend ignores a backend without a kernel on this machine, so
-	// probing each one yields the ones that run here.
 	t.Helper()
 	initial := structuralindex.ActiveBackend()
 	t.Cleanup(func() { structuralindex.SetBackend(initial) })
@@ -40,7 +39,6 @@ func vectorBackends(t testing.TB) []structuralindex.Backend {
 }
 
 func unsafeString(text []byte) string {
-	// The alias makes a kernel read text at its own address.
 	return unsafe.String(unsafe.SliceData(text), len(text))
 }
 
@@ -63,11 +61,10 @@ func checkBuild(t testing.TB, backend structuralindex.Backend, text string) {
 	}
 }
 
+// TestBuildEveryByteAtEveryPosition checks [structuralindex.Index.Build] across byte values, alignments, and lengths.
 func TestBuildEveryByteAtEveryPosition(t *testing.T) {
 	for _, backend := range vectorBackends(t) {
 		structuralindex.SetBackend(backend)
-		// The storage offset changes the alignment of the text, and the
-		// neighbours hold class bytes that must not leak into a bitmap.
 		storage := []byte(strings.Repeat(":@/.-5q\x7f", 16))
 		for n := 1; n <= structuralindex.MaxLen; n++ {
 			for offset := range 4 {
@@ -85,6 +82,7 @@ func TestBuildEveryByteAtEveryPosition(t *testing.T) {
 	}
 }
 
+// TestBuildRejectsUnindexableText checks the length and backend limits of [structuralindex.Index.Build].
 func TestBuildRejectsUnindexableText(t *testing.T) {
 	backends := append(vectorBackends(t), structuralindex.Portable)
 	for _, backend := range backends {
@@ -107,9 +105,8 @@ func TestBuildRejectsUnindexableText(t *testing.T) {
 	}
 }
 
-// TestBuildBesideProtectedPages places text against both edges of a page
-// whose neighbours fault on access, so a kernel that reads outside the pages
-// of the text crashes the test.
+// TestBuildBesideProtectedPages checks [structuralindex.Index.Build] near protected
+// memory pages so reads outside the source pages fault.
 func TestBuildBesideProtectedPages(t *testing.T) {
 	page := guardedPage(t)
 	for _, backend := range vectorBackends(t) {
@@ -131,6 +128,7 @@ func TestBuildBesideProtectedPages(t *testing.T) {
 	}
 }
 
+// TestMasks checks [structuralindex.LowMask] and [structuralindex.Range] at bitmap boundaries.
 func TestMasks(t *testing.T) {
 	for n := 0; n <= structuralindex.MaxLen; n++ {
 		if got := bits.OnesCount64(structuralindex.LowMask(n)); got != n {
@@ -158,6 +156,7 @@ func TestMasks(t *testing.T) {
 	}
 }
 
+// TestNext checks [structuralindex.Index.Next] at matching positions and bitmap boundaries.
 func TestNext(t *testing.T) {
 	backends := vectorBackends(t)
 	if len(backends) == 0 {
@@ -181,6 +180,7 @@ func TestNext(t *testing.T) {
 	}
 }
 
+// TestClassOf checks [structuralindex.ClassOf] for every byte value.
 func TestClassOf(t *testing.T) {
 	for value := range 256 {
 		b := byte(value)
@@ -200,6 +200,7 @@ func TestClassOf(t *testing.T) {
 	}
 }
 
+// FuzzBuild compares [structuralindex.Index.Build] with byte-wise classification across vector backends.
 func FuzzBuild(f *testing.F) {
 	f.Add("http://proxy.example.com:8080")
 	f.Add("socks5://alice:s3cr3t@203.0.113.27:1080")

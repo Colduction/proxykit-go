@@ -48,6 +48,7 @@ func checkPrintable(t testing.TB, s string) {
 	}
 }
 
+// TestIsHostNameEveryByteAtEveryPosition checks [structuralindex.IsHostName] for every byte value at each position.
 func TestIsHostNameEveryByteAtEveryPosition(t *testing.T) {
 	for n := 0; n <= 70; n++ {
 		text := []byte(strings.Repeat("a", n))
@@ -62,9 +63,8 @@ func TestIsHostNameEveryByteAtEveryPosition(t *testing.T) {
 	}
 }
 
-// TestIsHostNameAdjacentEdges puts every pair of name bytes at every pair of
-// adjacent positions, which covers pairs inside a word, across two words, and
-// inside the overlapping final word.
+// TestIsHostNameAdjacentEdges checks [structuralindex.IsHostName] with adjacent
+// letters, digits, hyphens, and dots across word boundaries.
 func TestIsHostNameAdjacentEdges(t *testing.T) {
 	const pairBytes = "a0-."
 	for n := 2; n <= 40; n++ {
@@ -81,6 +81,7 @@ func TestIsHostNameAdjacentEdges(t *testing.T) {
 	}
 }
 
+// TestIsHostNameExhaustiveShortNames checks [structuralindex.IsHostName] across short names and word boundaries.
 func TestIsHostNameExhaustiveShortNames(t *testing.T) {
 	const alphabet = "aZ0-._"
 	var visit func(prefix []byte, remaining int)
@@ -110,6 +111,7 @@ func TestIsHostNameExhaustiveShortNames(t *testing.T) {
 	}
 }
 
+// TestIsPrintableEveryByteAtEveryPosition checks [structuralindex.IsPrintable] for every byte value at each position.
 func TestIsPrintableEveryByteAtEveryPosition(t *testing.T) {
 	for n := 0; n <= 40; n++ {
 		text := []byte(strings.Repeat("~", n))
@@ -124,6 +126,7 @@ func TestIsPrintableEveryByteAtEveryPosition(t *testing.T) {
 	}
 }
 
+// FuzzIsHostName compares [structuralindex.IsHostName] with byte-wise validation.
 func FuzzIsHostName(f *testing.F) {
 	f.Add("proxy.example.com")
 	f.Add("a-.b")
@@ -133,6 +136,7 @@ func FuzzIsHostName(f *testing.F) {
 	})
 }
 
+// FuzzIsPrintable compares [structuralindex.IsPrintable] with byte-wise validation.
 func FuzzIsPrintable(f *testing.F) {
 	f.Add("s3cr3t pass~")
 	f.Add("tab\there")

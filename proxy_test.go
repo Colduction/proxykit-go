@@ -1,3 +1,4 @@
+// Package proxykit_test verifies proxy validation, conversion, and integration.
 package proxykit_test
 
 import (
@@ -14,6 +15,7 @@ import (
 
 var _ proxykit.ProxyProvider = (*proxykit.Proxy)(nil)
 
+// TestIsValidHostnamePort checks valid and invalid host-port pairs.
 func TestIsValidHostnamePort(t *testing.T) {
 	tests := []struct {
 		address string
@@ -84,6 +86,7 @@ func TestIsValidHostnamePort(t *testing.T) {
 	}
 }
 
+// TestIsValidHost checks IP literals and DNS name boundaries.
 func TestIsValidHost(t *testing.T) {
 	tests := []struct {
 		host  string
@@ -128,6 +131,7 @@ func TestIsValidHost(t *testing.T) {
 	}
 }
 
+// TestProxyValidatorMethods checks field validation, zero values, and nil receivers.
 func TestProxyValidatorMethods(t *testing.T) {
 	proxy := &proxykit.Proxy{
 		Scheme:   proxykit.HTTP,
@@ -171,6 +175,7 @@ func TestProxyValidatorMethods(t *testing.T) {
 	}
 }
 
+// TestProxyIsValid checks validation of complete proxy values.
 func TestProxyIsValid(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -201,6 +206,7 @@ func TestProxyIsValid(t *testing.T) {
 	}
 }
 
+// TestExportURL checks URL export, credentials, and nil receivers.
 func TestExportURL(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -244,6 +250,7 @@ func TestExportURL(t *testing.T) {
 	}
 }
 
+// TestProxySettersAndReset checks field access, mutation, reset, and nil receivers.
 func TestProxySettersAndReset(t *testing.T) {
 	var proxy proxykit.Proxy
 	proxy.SetScheme(proxykit.SOCKS5)
@@ -295,6 +302,7 @@ func TestProxySettersAndReset(t *testing.T) {
 	}
 }
 
+// TestParseScheme checks canonicalization and rejection of unsupported schemes.
 func TestParseScheme(t *testing.T) {
 	tests := []struct {
 		in   string
@@ -326,6 +334,7 @@ func TestParseScheme(t *testing.T) {
 	}
 }
 
+// TestSchemeMethods checks scheme names, validity, and default ports.
 func TestSchemeMethods(t *testing.T) {
 	ports := map[proxykit.ProxyScheme]uint16{
 		proxykit.HTTP:    80,
@@ -356,6 +365,7 @@ func TestSchemeMethods(t *testing.T) {
 	}
 }
 
+// TestValidate checks validation errors and their precedence.
 func TestValidate(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -417,6 +427,7 @@ func TestValidate(t *testing.T) {
 	}
 }
 
+// TestFromURL checks URL conversion, defaults, credentials, and invalid endpoints.
 func TestFromURL(t *testing.T) {
 	tests := []struct {
 		name string
@@ -481,6 +492,7 @@ func TestFromURL(t *testing.T) {
 	}
 }
 
+// TestFromURLInvalidPort checks rejection of invalid explicit URL ports.
 func TestFromURLInvalidPort(t *testing.T) {
 	for _, host := range []string{
 		"proxy.example.com:bad",
@@ -495,6 +507,7 @@ func TestFromURLInvalidPort(t *testing.T) {
 	}
 }
 
+// TestIsValidCredentialsFor checks credential rules for each proxy scheme.
 func TestIsValidCredentialsFor(t *testing.T) {
 	tests := []struct {
 		scheme             proxykit.ProxyScheme
@@ -528,6 +541,7 @@ func TestIsValidCredentialsFor(t *testing.T) {
 	}
 }
 
+// TestLogValue checks redacted logging for proxy values, pointers, and nil pointers.
 func TestLogValue(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
@@ -578,6 +592,7 @@ func TestLogValueMatchesRedactedURL(t *testing.T) {
 	}
 }
 
+// TestValidatorsDoNotAllocate checks zero allocations for representative valid endpoints and credentials.
 func TestValidatorsDoNotAllocate(t *testing.T) {
 	inputs := []string{
 		"proxy.example.com:8080",
@@ -604,6 +619,7 @@ func TestValidatorsDoNotAllocate(t *testing.T) {
 	}
 }
 
+// TestValidatorsDoNotInternZones checks that validation of fresh IPv6 zone IDs does not allocate.
 func TestValidatorsDoNotInternZones(t *testing.T) {
 	const runs = 100
 	inputs := make([]struct{ host, address string }, runs+1)
@@ -624,6 +640,7 @@ func TestValidatorsDoNotInternZones(t *testing.T) {
 	}
 }
 
+// FuzzIsValidHostnamePort checks consistency among endpoint validation, splitting, and host validation.
 func FuzzIsValidHostnamePort(f *testing.F) {
 	for _, seed := range []string{
 		"proxy.example.com:8080",
@@ -659,6 +676,7 @@ func FuzzIsValidHostnamePort(f *testing.F) {
 	})
 }
 
+// FuzzIsValidCredentials checks scheme-specific credential rules against shared limits.
 func FuzzIsValidCredentials(f *testing.F) {
 	f.Add("user", "pass")
 	f.Add("us:er", "pa:ss")
@@ -682,6 +700,7 @@ func FuzzIsValidCredentials(f *testing.F) {
 	})
 }
 
+// BenchmarkIsValidHostnamePort measures host-port validation for valid and invalid inputs.
 func BenchmarkIsValidHostnamePort(b *testing.B) {
 	cases := []string{
 		"proxy.example.com:8080",
@@ -714,6 +733,7 @@ func BenchmarkIsValidHostnamePort(b *testing.B) {
 	}
 }
 
+// BenchmarkIsValidHost measures IP literal and DNS name validation.
 func BenchmarkIsValidHost(b *testing.B) {
 	cases := []string{
 		"proxy.example.com",
@@ -735,6 +755,7 @@ func BenchmarkIsValidHost(b *testing.B) {
 	}
 }
 
+// BenchmarkSplitHostnamePort measures splitting of valid and invalid endpoints.
 func BenchmarkSplitHostnamePort(b *testing.B) {
 	cases := []string{
 		"proxy.example.com:8080",
@@ -753,6 +774,7 @@ func BenchmarkSplitHostnamePort(b *testing.B) {
 	}
 }
 
+// BenchmarkProxyValidatorMethods measures field and complete proxy validation.
 func BenchmarkProxyValidatorMethods(b *testing.B) {
 	proxy := &proxykit.Proxy{
 		Scheme:   proxykit.HTTP,
@@ -769,6 +791,7 @@ func BenchmarkProxyValidatorMethods(b *testing.B) {
 	}
 }
 
+// BenchmarkExportURL measures URL export with credentials.
 func BenchmarkExportURL(b *testing.B) {
 	proxy := &proxykit.Proxy{
 		Scheme:   proxykit.HTTP,

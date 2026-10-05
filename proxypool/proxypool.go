@@ -62,12 +62,12 @@ const (
 	modeCount
 )
 
-// IsValid reports whether mode is supported.
+// IsValid reports whether the iteration order is supported.
 func (mode Mode) IsValid() bool {
 	return mode < modeCount
 }
 
-// Valid returns an error when mode is unsupported.
+// Valid returns an error when the iteration order is unsupported.
 func (mode Mode) Valid() error {
 	if mode.IsValid() {
 		return nil
@@ -85,8 +85,8 @@ type Options struct {
 
 	// BlockBytes sets shuffled read granularity and retained data-buffer size.
 	// Values below one use [DefaultBlockBytes]. Sequential mode ignores it.
-	// Keep BlockBytes at least MaxLineBytes+2 when long lines are common to
-	// reduce continuation reads.
+	// Keep [Options.BlockBytes] at least two bytes larger than
+	// [Options.MaxLineBytes] when long lines are common to reduce continuation reads.
 	BlockBytes int `json:"blockBytes,omitempty" yaml:"blockBytes,omitempty" xml:"blockBytes,omitempty" cbor:"blockBytes,omitempty" bson:"blockBytes,omitempty" msgpack:"blockBytes,omitempty" toml:"blockBytes,omitempty" mapstructure:"blockBytes,omitempty"`
 
 	// RegionBytes sets shuffled seek locality. Values below one use
@@ -98,8 +98,9 @@ type Options struct {
 	// MaxLineBytes bounds one proxy, excluding one LF and optional preceding CR.
 	// Values below one use [DefaultMaxLineBytes]. This bound is required because
 	// no line-returning API can promise bounded memory for an unbounded line.
-	// The block size plus MaxLineBytes+3 must fit in 32 bits.
-	// That size including buffer alignment padding must also fit in int.
+	// The block size plus [Options.MaxLineBytes] and three extra bytes must fit
+	// in an unsigned 32-bit integer. The aligned size must fit in the native
+	// signed integer range.
 	MaxLineBytes int `json:"maxLineBytes,omitempty" yaml:"maxLineBytes,omitempty" xml:"maxLineBytes,omitempty" cbor:"maxLineBytes,omitempty" bson:"maxLineBytes,omitempty" msgpack:"maxLineBytes,omitempty" toml:"maxLineBytes,omitempty" mapstructure:"maxLineBytes,omitempty"`
 
 	// Seed selects deterministic shuffled order for the same source, options,
@@ -108,9 +109,10 @@ type Options struct {
 	Seed uint64 `json:"seed,omitempty" yaml:"seed,omitempty" xml:"seed,omitempty" cbor:"seed,omitempty" bson:"seed,omitempty" msgpack:"seed,omitempty" toml:"seed,omitempty" mapstructure:"seed,omitempty"`
 
 	// ShardCount partitions permuted regions among independent pools. Values
-	// below one select one shard. Pools using the same source, BlockBytes,
-	// RegionBytes, nonzero Seed, and ShardCount, with one pool for every
-	// ShardIndex in [0, ShardCount), collectively return every line exactly once.
+	// below one select one shard. Pools using the same source,
+	// [Options.BlockBytes], [Options.RegionBytes], nonzero [Options.Seed], and
+	// [Options.ShardCount], with one pool for each [Options.ShardIndex] from zero
+	// through one less than [Options.ShardCount], collectively return every line exactly once.
 	ShardCount int `json:"shardCount,omitempty" yaml:"shardCount,omitempty" xml:"shardCount,omitempty" cbor:"shardCount,omitempty" bson:"shardCount,omitempty" msgpack:"shardCount,omitempty" toml:"shardCount,omitempty" mapstructure:"shardCount,omitempty"`
 
 	// ShardIndex selects this pool's zero-based shard.
@@ -120,29 +122,29 @@ type Options struct {
 	Mode Mode `json:"mode,omitempty" yaml:"mode,omitempty" xml:"mode,omitempty" cbor:"mode,omitempty" bson:"mode,omitempty" msgpack:"mode,omitempty" toml:"mode,omitempty" mapstructure:"mode,omitempty"`
 
 	// Reuse starts another cycle after exhaustion. Shuffled cycles use new
-	// permutations. Reuse cannot be combined with sharding because a valid shard
-	// cycle may be empty.
+	// permutations. [Options.Reuse] cannot be combined with sharding because
+	// a valid shard cycle may be empty.
 	Reuse bool `json:"reuse,omitempty" yaml:"reuse,omitempty" xml:"reuse,omitempty" cbor:"reuse,omitempty" bson:"reuse,omitempty" msgpack:"reuse,omitempty" toml:"reuse,omitempty" mapstructure:"reuse,omitempty"`
 
 	// Prefetch asks the kernel to read ahead in the background while the
 	// current block is consumed, so that storage latency overlaps work when
 	// the file is not cached. It starts no goroutine. On Linux and macOS it
-	// sends POSIX_FADV_WILLNEED or F_RDADVISE for the next block and retains
-	// no Go memory; 32-bit Linux lacks the call. On Windows, [Pool.NextBatch]
+	// sends read-ahead advice for the next block and retains no Go memory;
+	// 32-bit Linux lacks the call. On Windows, [Pool.NextBatch]
 	// keeps overlapped reads of the next blocks in flight on a second handle
 	// while the caller consumes a [Batch], and reads them without buffering
 	// when the file is larger than the memory available to cache it and its
 	// blocks cover whole pages, which the defaults do. A pool that serves only
 	// batches then keeps two blocks besides the caller's, and
-	// [Stats.MaxRetainedBytes] allows for three more than without Prefetch;
-	// the Next and NextBytes paths read synchronously. The other platforms
+	// [Stats.MaxRetainedBytes] allows for three more than without [Options.Prefetch];
+	// [Pool.Next] and [Pool.NextBytes] read synchronously. The other platforms
 	// ignore it. A request the kernel rejects turns it off for the pool;
 	// [Stats.Prefetch] reports whether it is active.
 	Prefetch bool `json:"prefetch,omitempty" yaml:"prefetch,omitempty" xml:"prefetch,omitempty" cbor:"prefetch,omitempty" bson:"prefetch,omitempty" msgpack:"prefetch,omitempty" toml:"prefetch,omitempty" mapstructure:"prefetch,omitempty"`
 }
 
-// Stats is a point-in-time pool snapshot. File-size-derived counts use int64,
-// so 10 TiB files remain representable on 32-bit and 64-bit platforms.
+// Stats is a point-in-time pool snapshot. File-size-derived counts use signed
+// 64-bit integers, so 10 TiB files remain representable on 32-bit and 64-bit platforms.
 type Stats struct {
 	// FileSize is source size at open time, in bytes.
 	FileSize int64 `json:"fileSize" yaml:"fileSize" xml:"fileSize" cbor:"fileSize" bson:"fileSize" msgpack:"fileSize" toml:"fileSize" mapstructure:"fileSize"`
@@ -210,29 +212,34 @@ type Stats struct {
 }
 
 // Pool reads one immutable regular file. Its zero value behaves as closed. A
-// Pool must not be copied after first use. A Pool is safe for concurrent use,
+// [Pool] must not be copied after first use. A [Pool] is safe for concurrent use,
 // though calls share one cursor and therefore serialize. File I/O occurs while
-// holding that cursor lock, so Close, Reset, and other reads wait for an active
-// read; reads ahead that [Options.Prefetch] starts on Windows run in the
+// holding that cursor lock, so [Pool.Close], [Pool.Reset], and other reads wait
+// for an active read; reads ahead that [Options.Prefetch] starts on Windows run in the
 // kernel between calls. For parallel storage reads, open explicitly
 // partitioned pools with [Options.ShardCount].
 //
 // Both modes read the file one block at a time and keep one data block plus
-// uint32 line offsets. With B the block size, BlockBytes in shuffled mode and
-// SequentialBufferBytes in sequential mode, retained memory is bounded by
-// roughly B + MaxLineBytes + 4*B; each live [Batch] holds one more block, and
+// 32-bit line offsets. The block size is [Options.BlockBytes] in shuffled mode
+// and [Options.SequentialBufferBytes] in sequential mode. Retained memory is
+// bounded by roughly five block sizes plus [Options.MaxLineBytes];
+// each live [Batch] holds one more block, and
 // on Windows [Options.Prefetch] may keep up to three more for reads ahead.
-// [Stats.MaxRetainedBytes] reports the exact bound. A Pool does not preload
+// [Stats.MaxRetainedBytes] reports the exact bound. A [Pool] does not preload
 // source data, memory-map the file, build a sidecar, or start goroutines.
 //
 // Errors of a block, such as [ErrLineTooLong] or a read failure, surface when
 // the block loads, so they may precede lines that lie earlier in that block.
 type Pool struct {
 	noCopy            noCopy
+	hints             blockread.Hints
 	terminal          error
 	file              *os.File
+	ahead             *blockread.Ahead
 	buffer            []byte
 	offsets           []uint32
+	reader            blockread.Reader
+	aheadCleanup      runtime.Cleanup
 	fileSize          int64
 	modified          int64
 	blockCount        int64
@@ -264,10 +271,6 @@ type Pool struct {
 	maxLineBytes      int
 	shardCount        int
 	shardIndex        int
-	reader            blockread.Reader
-	hints             blockread.Hints
-	ahead             *blockread.Ahead
-	aheadCleanup      runtime.Cleanup
 	mu                sync.Mutex
 	mode              Mode
 	reuse             bool
@@ -277,19 +280,21 @@ type Pool struct {
 	carried           byte
 }
 
-// noCopy makes go vet report copies of a Pool after first use.
 type noCopy struct{}
 
-func (*noCopy) Lock()   {}
+// Lock is a no-op that marks its receiver as a lock for copy analysis.
+func (*noCopy) Lock() {}
+
+// Unlock is a no-op that completes the lock signature for copy analysis.
 func (*noCopy) Unlock() {}
 
-// New opens path with mode and reuse. Use [Open] for memory, locality, seed,
-// or shard controls.
+// New opens a proxy file with the selected iteration order and reuse setting.
+// Use [Open] for memory, locality, seed, or shard controls.
 func New(path string, mode Mode, reuse bool) (*Pool, error) {
 	return Open(path, Options{Mode: mode, Reuse: reuse})
 }
 
-// Open opens an immutable newline-delimited regular file. Open performs no
+// Open opens an immutable newline-delimited regular file. It performs no
 // source scan, proportional allocation, sidecar construction, or preloading.
 // The source must not change until [Pool.Close]. Size and modification-time
 // checks detect ordinary changes at exhaustion and after roughly each
@@ -376,7 +381,6 @@ func Open(path string, options Options) (*Pool, error) {
 		return nil, errors.New("proxypool: effective region size overflows int64")
 	}
 	regionBytes = blocksPerRegion * int64(blockBytes)
-	// Source validation cadence stays independent of the locality setting.
 	regionsPerCheck := max(int64(1), DefaultRegionBytes/regionBytes)
 	pool := &Pool{
 		file:            file,
@@ -402,7 +406,7 @@ func Open(path string, options Options) (*Pool, error) {
 	return pool, nil
 }
 
-// Next returns next proxy.
+// Next returns the next proxy as a caller-owned string.
 // It returns [io.EOF] after exhaustion, [ErrClosed] after close, and the
 // underlying I/O or validation error on failure.
 // Every returned error remains terminal until a successful [Pool.Reset].
@@ -421,10 +425,11 @@ func (pool *Pool) Next() (string, error) {
 	return result, nil
 }
 
-// NextBytes appends next proxy to dst[:0]. Returned bytes belong to caller.
-// With sufficient dst capacity, steady-state calls allocate no memory after
-// internal buffers reach the required capacities. It returns the same errors as
-// [Pool.Next] and returns dst[:0] on error.
+// NextBytes appends the next proxy to the destination after resetting its length to zero.
+// Returned bytes belong to the caller. With sufficient destination capacity,
+// steady-state calls allocate no memory after internal buffers reach the
+// required capacities. It returns the same errors as
+// [Pool.Next] and returns the destination with zero length on error.
 func (pool *Pool) NextBytes(dst []byte) ([]byte, error) {
 	if pool == nil {
 		return dst[:0], ErrClosed
@@ -877,7 +882,7 @@ func (pool *Pool) lineTooLong(offset int64) error {
 	return fmt.Errorf("%w at byte %d: limit %d", ErrLineTooLong, offset, pool.maxLineBytes)
 }
 
-// Reset rewinds to original cycle and deterministic order. Reset clears a
+// Reset rewinds to the original cycle and deterministic order. It clears a
 // terminal read error after validating source metadata.
 func (pool *Pool) Reset() error {
 	if pool == nil {
@@ -940,7 +945,8 @@ func (pool *Pool) Stats() Stats {
 	}
 }
 
-// Close releases file and buffers. Calls after first return nil.
+// Close releases the file and pool-owned buffers, settling any reads in flight.
+// Calls after the first return nil, including calls on nil and zero-value pools.
 func (pool *Pool) Close() error {
 	if pool == nil {
 		return nil

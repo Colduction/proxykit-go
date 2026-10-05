@@ -7,6 +7,7 @@ import (
 	"github.com/colduction/proxykit-go/proxypool"
 )
 
+// FuzzPoolMatchesFile checks source coverage, deterministic replay, cursor counts, and storage bounds for varied layouts and shards.
 func FuzzPoolMatchesFile(f *testing.F) {
 	for i, layout := range batchLayouts {
 		f.Add([]byte(layout), uint8(i), uint8(i), uint64(i+1))

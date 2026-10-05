@@ -104,7 +104,7 @@ func TestParseDuplicateEndpointFields(t *testing.T) {
 	}
 }
 
-// BenchmarkNewInvalidFormat measures rejection before and after long valid prefixes.
+// BenchmarkNewInvalidFormat measures rejection of formats with short and long valid prefixes.
 func BenchmarkNewInvalidFormat(b *testing.B) {
 	for _, test := range []struct {
 		name, format string

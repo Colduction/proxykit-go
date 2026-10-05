@@ -2,39 +2,37 @@
 
 package blockread
 
-// An Ahead keeps reads of a file in flight into storage it holds. Only
-// Windows provides one; elsewhere [Reader.OpenAhead] returns nil and its
-// methods do nothing.
+// An Ahead represents reads in flight into retained storage.
+// This platform provides no implementation: [Reader.OpenAhead] returns nil,
+// and the methods return their unavailable results without accessing the receiver.
 type Ahead struct{}
 
-// Direct reports whether the reads of ahead bypass the system cache.
+// Direct reports whether reads bypass the system cache; it returns false.
 func (*Ahead) Direct() bool { return false }
 
-// Find returns the slot of the read of block in flight, or -1.
+// Find returns -1 because this platform has no reads in flight.
 func (*Ahead) Find(int64) int { return -1 }
 
-// Idle returns a slot with no read in flight, or -1.
+// Idle returns -1 because this platform has no read slots.
 func (*Ahead) Idle() int { return -1 }
 
-// Block returns the block of the read in slot and whether it is in flight.
+// Block returns zero and false because this platform has no reads in flight.
 func (*Ahead) Block(int) (int64, bool) { return 0, false }
 
-// Swap exchanges the storage slot holds for storage and returns it.
+// Swap returns the supplied storage without retaining it.
 func (*Ahead) Swap(_ int, storage []byte) []byte { return storage }
 
-// Start reads target, which lies in storage, at offset for block in slot.
+// Start returns nil without submitting a read.
 func (*Ahead) Start(int, int64, []byte, []byte, int64) error { return nil }
 
-// Wait waits for the read in slot and reports its offset, length, count,
-// and error.
+// Wait returns zero offsets and counts and a nil error without waiting.
 func (*Ahead) Wait(int) (int64, int, int, error) { return 0, 0, 0, nil }
 
-// Settle cancels the read in slot and waits until it lets go of its storage.
+// Settle returns without performing an operation.
 func (*Ahead) Settle(int) {}
 
-// RetainedBytes returns the memory the storage of ahead retains, which is 0
-// for a nil Ahead.
+// RetainedBytes returns zero because this platform retains no storage.
 func (*Ahead) RetainedBytes() int64 { return 0 }
 
-// Close settles the reads of ahead and releases its resources.
+// Close returns without performing an operation.
 func (*Ahead) Close() {}

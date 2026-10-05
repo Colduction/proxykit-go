@@ -11,7 +11,7 @@ import (
 	"github.com/colduction/proxykit-go/proxypool"
 )
 
-// TestPrefetchDirectLargeLineLimit checks aligned reads when the line limit exceeds the source size.
+// TestPrefetchDirectLargeLineLimit checks aligned unbuffered reads when the configured line limit exceeds the source size.
 func TestPrefetchDirectLargeLineLimit(t *testing.T) {
 	defer blockread.SetForceDirect(blockread.SetForceDirect(true))
 	content := strings.Repeat("x", 64<<10) + "\r\n" + strings.Repeat("y", 192<<10) + "\r"
@@ -40,10 +40,7 @@ func TestPrefetchDirectLargeLineLimit(t *testing.T) {
 	}
 }
 
-// Reads without buffering cover whole pages from each block's first byte,
-// and the byte before a block that does not follow the last one loaded comes
-// from a separate read. Small regions mix both kinds of block, and the file
-// ends inside a page.
+// TestPrefetchDirectMatchesWithout checks unbuffered read-ahead against synchronous reads across block and page boundaries.
 func TestPrefetchDirectMatchesWithout(t *testing.T) {
 	defer blockread.SetForceDirect(blockread.SetForceDirect(true))
 	path, _ := makeProxyFile(t, 30_000)
@@ -92,9 +89,7 @@ func TestPrefetchDirectMatchesWithout(t *testing.T) {
 	}
 }
 
-// A source that shrinks while reads ahead are in flight makes them fail at
-// once or come back short; the pool must report the change rather than wait
-// for a read that never started, in both kinds of read ahead.
+// TestPrefetchSourceTruncated checks terminal source-change errors after truncation while buffered or unbuffered reads are in flight.
 func TestPrefetchSourceTruncated(t *testing.T) {
 	for _, direct := range []bool{false, true} {
 		func() {

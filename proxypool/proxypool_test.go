@@ -74,6 +74,7 @@ func sortedCopy(values []string) []string {
 	return copyOfValues
 }
 
+// TestOpenValidation checks invalid modes, paths, shard settings, and region sizes.
 func TestOpenValidation(t *testing.T) {
 	path := writeFile(t, "proxy\n")
 	tests := []struct {
@@ -100,6 +101,7 @@ func TestOpenValidation(t *testing.T) {
 	}
 }
 
+// TestSequentialLineShapes checks empty lines, line endings, unterminated lines, and exhaustion.
 func TestSequentialLineShapes(t *testing.T) {
 	content := "\nalpha\r\nbeta\ngamma\r\nlast\r"
 	pool, err := proxypool.Open(writeFile(t, content), proxypool.Options{
@@ -122,6 +124,7 @@ func TestSequentialLineShapes(t *testing.T) {
 	}
 }
 
+// TestSequentialLongLineAndLimit checks cross-block lines and terminal line-limit errors.
 func TestSequentialLongLineAndLimit(t *testing.T) {
 	path := writeFile(t, strings.Repeat("x", 257)+"\r\ny\n")
 	pool, err := proxypool.Open(path, proxypool.Options{
@@ -153,6 +156,7 @@ func TestSequentialLongLineAndLimit(t *testing.T) {
 	}
 }
 
+// TestSequentialReuseAndReset checks repeated cycles and rewinding to the first line.
 func TestSequentialReuseAndReset(t *testing.T) {
 	pool, err := proxypool.Open(writeFile(t, "a\nb\n"), proxypool.Options{Reuse: true, Seed: 1})
 	if err != nil {
@@ -176,6 +180,7 @@ func TestSequentialReuseAndReset(t *testing.T) {
 	}
 }
 
+// TestExhaustionPersistsUntilReset checks that exhaustion remains terminal until [proxypool.Pool.Reset].
 func TestExhaustionPersistsUntilReset(t *testing.T) {
 	path := writeFile(t, "proxy\n")
 	for _, mode := range []proxypool.Mode{proxypool.ModeSequential, proxypool.ModeShuffled} {
@@ -201,6 +206,7 @@ func TestExhaustionPersistsUntilReset(t *testing.T) {
 	}
 }
 
+// TestEmptyFileReuseDoesNotLoop checks that reusable empty pools return [io.EOF].
 func TestEmptyFileReuseDoesNotLoop(t *testing.T) {
 	for _, mode := range []proxypool.Mode{proxypool.ModeSequential, proxypool.ModeShuffled} {
 		pool, err := proxypool.Open(writeFile(t, ""), proxypool.Options{Mode: mode, Reuse: true})
@@ -214,6 +220,7 @@ func TestEmptyFileReuseDoesNotLoop(t *testing.T) {
 	}
 }
 
+// TestShuffledLineLayoutsEveryBoundary checks complete shuffled coverage across line and block boundaries.
 func TestShuffledLineLayoutsEveryBoundary(t *testing.T) {
 	contents := []string{
 		"",
@@ -254,6 +261,7 @@ func TestShuffledLineLayoutsEveryBoundary(t *testing.T) {
 	}
 }
 
+// TestShuffledLongLineCrossesBlocks checks shuffled lines spanning several blocks.
 func TestShuffledLongLineCrossesBlocks(t *testing.T) {
 	content := "first\n" + strings.Repeat("x", 63) + "\r\nlast"
 	pool, err := proxypool.Open(writeFile(t, content), proxypool.Options{
@@ -276,6 +284,7 @@ func TestShuffledLongLineCrossesBlocks(t *testing.T) {
 	}
 }
 
+// TestShuffledContinuationEndsWithSplitCRLFAtLimit checks a maximum-length continuation with a split CRLF ending.
 func TestShuffledContinuationEndsWithSplitCRLFAtLimit(t *testing.T) {
 	content := "aaaaaa\n" + strings.Repeat("x", 8) + "\r\nend"
 	pool, err := proxypool.Open(writeFile(t, content), proxypool.Options{
@@ -298,6 +307,7 @@ func TestShuffledContinuationEndsWithSplitCRLFAtLimit(t *testing.T) {
 	}
 }
 
+// TestShuffledRandomizedLayouts checks complete shuffled coverage of randomized line layouts.
 func TestShuffledRandomizedLayouts(t *testing.T) {
 	random := rand.New(rand.NewPCG(0x1234, 0x5678))
 	for testIndex := range 250 {
@@ -337,6 +347,7 @@ func TestShuffledRandomizedLayouts(t *testing.T) {
 	}
 }
 
+// TestShuffledLineTooLong checks rejection of a shuffled line exceeding the configured limit.
 func TestShuffledLineTooLong(t *testing.T) {
 	pool, err := proxypool.Open(writeFile(t, strings.Repeat("x", 65)), proxypool.Options{
 		Mode:         proxypool.ModeShuffled,
@@ -354,6 +365,7 @@ func TestShuffledLineTooLong(t *testing.T) {
 	}
 }
 
+// TestShuffledResetReplaysOrder checks deterministic replay after [proxypool.Pool.Reset].
 func TestShuffledResetReplaysOrder(t *testing.T) {
 	path, _ := makeProxyFile(t, 100)
 	pool, err := proxypool.Open(path, proxypool.Options{
@@ -383,6 +395,7 @@ func TestShuffledResetReplaysOrder(t *testing.T) {
 	}
 }
 
+// TestShuffledReuseStartsCompleteCycles checks that automatic reuse returns every line in each cycle.
 func TestShuffledReuseStartsCompleteCycles(t *testing.T) {
 	path, want := makeProxyFile(t, 73)
 	pool, err := proxypool.Open(path, proxypool.Options{
@@ -414,6 +427,7 @@ func TestShuffledReuseStartsCompleteCycles(t *testing.T) {
 	}
 }
 
+// TestShardsCollectivelyExactOnce checks that all shards together return each source line once.
 func TestShardsCollectivelyExactOnce(t *testing.T) {
 	const shardCount = 7
 	path, want := makeProxyFile(t, 1_000)
@@ -443,6 +457,7 @@ func TestShardsCollectivelyExactOnce(t *testing.T) {
 	}
 }
 
+// TestShardsLongLineAcrossRegions checks exact shard coverage of lines crossing region boundaries.
 func TestShardsLongLineAcrossRegions(t *testing.T) {
 	content := strings.Repeat("x", 100) + "\nlast\n"
 	path := writeFile(t, content)
@@ -473,6 +488,7 @@ func TestShardsLongLineAcrossRegions(t *testing.T) {
 	}
 }
 
+// TestShardWithoutAssignedRegionIsEmpty checks exhaustion of a shard with no assigned region.
 func TestShardWithoutAssignedRegionIsEmpty(t *testing.T) {
 	pool, err := proxypool.Open(writeFile(t, "a\n"), proxypool.Options{
 		Mode:         proxypool.ModeShuffled,
@@ -492,6 +508,7 @@ func TestShardWithoutAssignedRegionIsEmpty(t *testing.T) {
 	}
 }
 
+// TestConcurrentNextExactOnce checks that concurrent readers return each line once.
 func TestConcurrentNextExactOnce(t *testing.T) {
 	const workers = 8
 	path, want := makeProxyFile(t, 5_000)
@@ -539,6 +556,7 @@ func TestConcurrentNextExactOnce(t *testing.T) {
 	}
 }
 
+// TestSourceChangeBecomesTerminal checks that source modifications produce a persistent [proxypool.ErrSourceChanged].
 func TestSourceChangeBecomesTerminal(t *testing.T) {
 	path := writeFile(t, "a\nb\nc\nd\ne\nf\n")
 	pool, err := proxypool.Open(path, proxypool.Options{
@@ -578,6 +596,7 @@ func TestSourceChangeBecomesTerminal(t *testing.T) {
 	}
 }
 
+// TestSequentialDoesNotReadAppendedData checks that appended data is rejected as a source modification.
 func TestSequentialDoesNotReadAppendedData(t *testing.T) {
 	path := writeFile(t, "a\n")
 	pool, err := proxypool.Open(path, proxypool.Options{})
@@ -602,6 +621,7 @@ func TestSequentialDoesNotReadAppendedData(t *testing.T) {
 	}
 }
 
+// TestTenTiBSparseFileOpensWithoutProportionalMemory checks bounded opening storage and file counts for a 10 TiB sparse source.
 func TestTenTiBSparseFileOpensWithoutProportionalMemory(t *testing.T) {
 	const tenTiB int64 = 10 << 40
 	path := filepath.Join(t.TempDir(), "ten-tib.txt")
@@ -639,6 +659,7 @@ func TestTenTiBSparseFileOpensWithoutProportionalMemory(t *testing.T) {
 	}
 }
 
+// TestStatsMemoryBound checks reported retained storage and cursor counts against their bounds.
 func TestStatsMemoryBound(t *testing.T) {
 	pool, err := proxypool.Open(writeFile(t, strings.Repeat("\n", 4096)), proxypool.Options{
 		Mode:         proxypool.ModeShuffled,
@@ -666,6 +687,7 @@ func TestStatsMemoryBound(t *testing.T) {
 	}
 }
 
+// TestLargeLineLimitAllocatesLazily checks that a large configured line limit does not allocate its full capacity.
 func TestLargeLineLimitAllocatesLazily(t *testing.T) {
 	const largeLimit = 1 << 30
 	content := strings.Repeat("x", 100) + "\n"
@@ -701,6 +723,7 @@ func TestLargeLineLimitAllocatesLazily(t *testing.T) {
 	}
 }
 
+// TestNextBytesZeroAllocation checks zero allocations for warmed reusable pools with caller-owned buffers.
 func TestNextBytesZeroAllocation(t *testing.T) {
 	path, _ := makeProxyFile(t, 100)
 	for _, test := range []struct {
@@ -743,6 +766,7 @@ func TestNextBytesZeroAllocation(t *testing.T) {
 	}
 }
 
+// TestShuffledContinuationZeroAllocation checks zero allocations for warmed shuffled continuation reads without race instrumentation.
 func TestShuffledContinuationZeroAllocation(t *testing.T) {
 	if raceEnabled {
 		t.Skip("race instrumentation adds allocations to the ReadAt path")
@@ -778,6 +802,7 @@ func TestShuffledContinuationZeroAllocation(t *testing.T) {
 	}
 }
 
+// TestCloseAndNilPool checks repeated closing and closed behavior of nil and zero-value pools.
 func TestCloseAndNilPool(t *testing.T) {
 	pool, err := proxypool.New(writeFile(t, "a\n"), proxypool.ModeSequential, false)
 	if err != nil {
@@ -819,6 +844,7 @@ func TestCloseAndNilPool(t *testing.T) {
 
 const benchmarkLines = 100_000
 
+// BenchmarkOpen measures opening and closing pools in each iteration mode.
 func BenchmarkOpen(b *testing.B) {
 	path, _ := makeProxyFile(b, benchmarkLines)
 	for _, mode := range []proxypool.Mode{proxypool.ModeSequential, proxypool.ModeShuffled} {
@@ -835,6 +861,7 @@ func BenchmarkOpen(b *testing.B) {
 	}
 }
 
+// BenchmarkNextBytes measures steady-state line copies into a reused caller-owned buffer.
 func BenchmarkNextBytes(b *testing.B) {
 	path, _ := makeProxyFile(b, benchmarkLines)
 	for _, test := range []struct {
@@ -867,6 +894,7 @@ func BenchmarkNextBytes(b *testing.B) {
 	}
 }
 
+// BenchmarkShuffledContinuation measures shuffled reads of lines larger than the configured block size.
 func BenchmarkShuffledContinuation(b *testing.B) {
 	path := writeFile(b, strings.Repeat(strings.Repeat("x", 1<<10)+"\n", 200))
 	pool, err := proxypool.Open(path, proxypool.Options{
@@ -896,6 +924,7 @@ func BenchmarkShuffledContinuation(b *testing.B) {
 	}
 }
 
+// BenchmarkExhaustedNextBytes measures calls returning [io.EOF] from an exhausted pool.
 func BenchmarkExhaustedNextBytes(b *testing.B) {
 	path := writeFile(b, "proxy\n")
 	for _, test := range []struct {
@@ -929,6 +958,7 @@ func BenchmarkExhaustedNextBytes(b *testing.B) {
 	}
 }
 
+// BenchmarkReadCycle measures opening, reading, and closing a complete source cycle.
 func BenchmarkReadCycle(b *testing.B) {
 	path, _ := makeProxyFile(b, benchmarkLines)
 	info, err := os.Stat(path)
@@ -973,6 +1003,7 @@ func BenchmarkReadCycle(b *testing.B) {
 	}
 }
 
+// BenchmarkSequentialBuffer measures full sequential cycles at several block sizes.
 func BenchmarkSequentialBuffer(b *testing.B) {
 	path, _ := makeProxyFile(b, benchmarkLines)
 	info, err := os.Stat(path)

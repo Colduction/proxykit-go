@@ -1,3 +1,4 @@
+// Package fileopen_test verifies file opening and descriptor access through [fileopen].
 package fileopen_test
 
 import (
@@ -12,6 +13,7 @@ import (
 	"github.com/colduction/proxykit-go/internal/fileopen"
 )
 
+// TestOpen checks [fileopen.Open] with sequential hints and missing files.
 func TestOpen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "source")
 	if err := os.WriteFile(path, []byte("1.2.3.4:8080\n"), 0o600); err != nil {
@@ -33,6 +35,7 @@ func TestOpen(t *testing.T) {
 	}
 }
 
+// TestWithFD checks [fileopen.WithFD] with nil files and callback errors.
 func TestWithFD(t *testing.T) {
 	if err := fileopen.WithFD(nil, func(uintptr) error { return nil }); !errors.Is(err, os.ErrInvalid) {
 		t.Fatalf("WithFD(nil) = %v, want ErrInvalid", err)
@@ -48,6 +51,7 @@ func TestWithFD(t *testing.T) {
 	}
 }
 
+// TestUnavailableCalls checks unsupported [fileopen.Fadvise] and [fileopen.FcntlInt] calls.
 func TestUnavailableCalls(t *testing.T) {
 	if runtime.GOOS != "linux" || bits.UintSize == 32 {
 		if err := fileopen.Fadvise(0, 0, 0, 0); !errors.Is(err, errors.ErrUnsupported) {
